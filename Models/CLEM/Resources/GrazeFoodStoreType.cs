@@ -27,7 +27,7 @@ namespace Models.CLEM.Resources
     public class GrazeFoodStoreType : CLEMResourceTypeBase, IResourceWithTransactionType, IResourceType
     {
         [Link]
-        ZoneCLEM ZoneCLEM = null;
+        private ZoneCLEM zoneCLEM = null;
 
         /// <summary>
         /// Unit type
@@ -188,6 +188,17 @@ namespace Models.CLEM.Resources
                     throw new ApsimXException(this, String.Format("Each [r=GrazeStoreType] can only be managed by a single activity./nTwo managing activities ([a={0}] and [a={1}]) are trying to manage [r={2}]", manager.Name, value.Name, this.Name));
                 }
                 manager = value;
+            }
+        }
+
+        /// <summary>
+        /// Total value of resource
+        /// </summary>
+        public double? Value
+        {
+            get
+            {
+                return Price(PurchaseOrSalePricingStyleType.Sale)?.CalculateValue(Amount);
             }
         }
 
@@ -452,7 +463,7 @@ namespace Models.CLEM.Resources
                 Pools.RemoveAll(a => a.Amount < 0.01);
             }
 
-            if (ZoneCLEM.IsEcologicalIndicatorsCalculationMonth())
+            if (zoneCLEM.IsEcologicalIndicatorsCalculationMonth())
             {
                 OnEcologicalIndicatorsCalculated(new EcolIndicatorsEventArgs() { Indicators = CurrentEcologicalIndicators });
                 // reset so available is sum of years growth

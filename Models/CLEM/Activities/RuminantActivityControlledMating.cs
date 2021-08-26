@@ -45,6 +45,7 @@ namespace Models.CLEM.Activities
         public RuminantActivityControlledMating()
         {
             this.ModelSummaryStyle = HTMLSummaryStyle.SubActivity;
+            TransactionCategory = "Livestock.Manage";
         }
 
         /// <summary>An event handler to allow us to initialise ourselves.</summary>
@@ -64,23 +65,17 @@ namespace Models.CLEM.Activities
             attributeList = this.FindAllDescendants<SetAttributeWithValue>().ToList();
 
             // get labour specifications
-            labour = this.FindAllChildren<LabourRequirement>().Cast<LabourRequirement>().ToList();
-            if (labour.Count() == 0)
-            {
-                labour = new List<LabourRequirement>();
-            }
+            labour = this.FindAllChildren<LabourRequirement>().ToList();
 
             milkingTimer = FindChild<ActivityTimerBreedForMilking>();
 
             // check that timer exists for controlled mating
             if (!this.TimingExists)
-            {
                 Summary.WriteWarning(this, $"Breeding with controlled mating [a={this.Parent.Name}].[a={this.Name}] requires a Timer otherwise breeding will be undertaken every time-step");
-            }
 
             // get details from parent breeding activity
             breedingParent = this.Parent as RuminantActivityBreed;
-            breedParams = Resources.GetResourceItem(this, $"{Resources.RuminantHerd().Name}.{breedingParent.PredictedHerdBreed}", OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop) as RuminantType;
+            breedParams = Resources.FindResourceType<RuminantHerd, RuminantType>(this, $"{HerdResource.Name}.{breedingParent.PredictedHerdName}", OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop);
         }
 
         #region validation
@@ -102,7 +97,7 @@ namespace Models.CLEM.Activities
         }
         #endregion
 
-        /// <summary>An event handler to allow us to initialise ourselves.</summary>
+        /// <summary>An event handler to perfrom actions needed at the start of the time step</summary>
         /// <param name="sender">The sender.</param>
         /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
         [EventSubscribe("CLEMStartOfTimeStep")]
@@ -241,13 +236,10 @@ namespace Models.CLEM.Activities
                     }
 
                     if (limiter < 1)
-                    {
                         this.Status = ActivityStatus.Partial;
-                    }
                     else if (limiter == 1)
-                    {
                         this.Status = ActivityStatus.Success;
-                    }
+
                     breeders = breeders.Take(Convert.ToInt32(Math.Floor(breeders.Count() * limiter), CultureInfo.InvariantCulture));
                 }
                 // report that this activity was performed as it does not use base GetResourcesRequired
@@ -260,38 +252,9 @@ namespace Models.CLEM.Activities
         /// Private method to determine resources required for this activity in the current month
         /// This method is local to this activity and not called with CLEMGetResourcesRequired event
         /// </summary>
-        /// <returns>List of required resource requests</returns>
+        /// <param name="breederList">The breeders being mated</param>
+        /// <returns>List of resource requests</returns>
         private List<ResourceRequest> GetResourcesNeededForActivityLocal(IEnumerable<Ruminant> breederList)
-        {
-            return null;
-        }
-
-        /// <inheritdoc/>
-        public override void AdjustResourcesNeededForActivity()
-        {
-            throw new NotImplementedException();
-        }
-
-        /// <inheritdoc/>
-        public override void DoActivity()
-        {
-            throw new NotImplementedException();
-        }
-
-        /// <inheritdoc/>
-        public override GetDaysLabourRequiredReturnArgs GetDaysLabourRequired(LabourRequirement requirement)
-        {
-            throw new NotImplementedException();
-        }
-
-        /// <inheritdoc/>
-        public override List<ResourceRequest> GetResourcesNeededForActivity()
-        {
-            throw new NotImplementedException();
-        }
-
-        /// <inheritdoc/>
-        public override List<ResourceRequest> GetResourcesNeededForinitialisation()
         {
             return null;
         }
