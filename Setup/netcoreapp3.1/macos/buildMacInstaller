@@ -14,6 +14,7 @@ set -euo pipefail
 usage="Usage: $0 <Version> [outfile]"
 test $# -ge 1 || (echo $usage; exit 1)
 version=$1
+revision=$(echo $version | cut -d. -f3)
 
 # Get apsimx path (path of repository root)
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -24,7 +25,19 @@ sed -i -e "s/0\.0\.0\.0/$version/g" "$apsimx/Models/Properties/AssemblyVersion.c
 cp "$apsimx/Models/Properties/AssemblyVersion.cs" "$apsimx/ApsimNG/Properties/"
 
 # Publish the build.
-dotnet publish --nologo -f netcoreapp3.1 -c Release -r osx-x64 "$apsimx/ApsimX.sln"
+
+# fixme - this is a hack to workaround problems caused by building all
+# proejcts to the same output dir. Basically if we build ApsimNG after
+# Models, an ELF Models binary will be copied in as a dependency for ApsimNG,
+# which will overwrite the previously-built Mach-O binary. Therefore we
+# need to build Models last. The problem also occurs if we just publish
+# the solution file, as Models will be one of the first proejcts to be
+# built/copied, as it's a dependency for several others.
+projects=(ApsimNG APSIM.Server Models)
+for project in ${projects[@]}
+do
+    dotnet publish --nologo -f netcoreapp3.1 -c Release -r osx-x64 $project
+done
 
 # Now generate the installer.
 
@@ -35,7 +48,7 @@ sed -i -e "s/@Version/$version/g" "$plist"
 # Delete MacBundle directory if it already exists.
 test -d MacBundle && rm -rf MacBundle
 
-appdir=MacBundle/APSIM$version.app/Contents
+appdir=MacBundle/APSIM$revision.app/Contents
 template="$apsimx/Setup/osx/Template"
 copy() {  rsync -aq --mkpath --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' $@; }
 copy "$DIR/launcher.sh" $appdir/MacOS/ApsimNG

@@ -106,7 +106,7 @@ namespace UserInterface.Interfaces
         /// Whether or not a 'more info' button should be drawn under the message. 
         /// If the message is not an error, this parameter has no effect.
         /// </param>
-        void ShowMessage(string message, Models.Core.Simulation.ErrorLevel errorLevel, bool overwrite = true, bool addSeparator = false, bool withButton = true);
+        void ShowMessage(string message, Models.Core.MessageType errorLevel, bool overwrite = true, bool addSeparator = false, bool withButton = true);
 
         /// <summary>
         /// Clear the status panel.
@@ -200,14 +200,6 @@ namespace UserInterface.Interfaces
         /// <param name="text">Text to be copied.</param>
         /// <param name="clipboardName">Name of the clipboard.</param>
         void SetClipboardText(string text, string clipboardName);
-
-        /// <summary>
-        /// Invoked when theme is toggled.
-        /// Toggles the icon displayed on the "toggle theme" button.
-        /// </summary>
-        /// <param name="sender">Sender object.</param>
-        /// <param name="args">Event arguments.</param>
-        void ToggleTheme(object sender, EventArgs args);
 
         /// <summary>
         /// Shows the font selection dialog.

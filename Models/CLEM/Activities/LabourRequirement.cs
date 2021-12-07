@@ -1,4 +1,4 @@
-﻿using Models.Core;
+using Models.Core;
 using Models.CLEM.Activities;
 using System;
 using System.Collections.Generic;
@@ -35,7 +35,7 @@ namespace Models.CLEM.Activities
     [ValidParent(ParentType = typeof(PastureActivityCutAndCarry))]
     [ValidParent(ParentType = typeof(LabourActivityTask))]
     [ValidParent(ParentType = typeof(LabourActivityOffFarm))]
-    [Description("Defines the amount and type of labour required for an activity. This model component must have at least one LabourFilterGroup nested below in the UI tree structure")]
+    [Description("Defines the amount and type of labour required for an activity. This component must have at least one LabourFilterGroup as a child")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Activities/Labour/LabourRequirement.htm")]
     public class LabourRequirement: CLEMModel, IValidatableObject
@@ -122,16 +122,16 @@ namespace Models.CLEM.Activities
         {
             var results = new List<ValidationResult>();
             // ensure labour resource added
-            Labour lab = Resources.GetResourceGroupByType(typeof(Labour)) as Labour;
+            Labour lab = Resources.FindResource<Labour>();
             if (lab == null)
-                Summary.WriteWarning(this, "[a=" + this.Parent.Name + "][f=" + this.Name + "] No labour resorces in simulation. Labour requirement will be ignored.");
+                Summary.WriteMessage(this, "[a=" + this.Parent.Name + "][f=" + this.Name + "] No labour resorces in simulation. Labour requirement will be ignored.", MessageType.Warning);
             else
                 if (lab.Children.Count <= 0)
-                    Summary.WriteWarning(this, "[a=" + this.Parent.Name + "][f=" + this.Name + "] No labour resorce types are provided in the labour resource. Labour requirement will be ignored.");
+                    Summary.WriteMessage(this, "[a=" + this.Parent.Name + "][f=" + this.Name + "] No labour resorce types are provided in the labour resource. Labour requirement will be ignored.", MessageType.Warning);
 
             // check filter groups present
             if (this.Children.OfType<LabourFilterGroup>().Count() == 0)
-                Summary.WriteWarning(this, "No LabourFilterGroup is supplied with the LabourRequirement for [a=" + this.Parent.Name + "]. No labour will be used for this activity.");
+                Summary.WriteMessage(this, "No LabourFilterGroup is supplied with the LabourRequirement for [a=" + this.Parent.Name + "]. No labour will be used for this activity.", MessageType.Warning);
 
             // check for individual nesting.
             foreach (LabourFilterGroup fg in this.FindAllChildren<LabourFilterGroup>())
@@ -155,7 +155,7 @@ namespace Models.CLEM.Activities
         #region descriptive summary
 
         /// <inheritdoc/>
-        public override string ModelSummary(bool formatForParentControl)
+        public override string ModelSummary()
         {
             using (StringWriter htmlWriter = new StringWriter())
             {
@@ -189,13 +189,13 @@ namespace Models.CLEM.Activities
         }
 
         /// <inheritdoc/>
-        public override string ModelSummaryInnerClosingTags(bool formatForParentControl)
+        public override string ModelSummaryInnerClosingTags()
         {
             return "\r\n</div>";
         }
 
         /// <inheritdoc/>
-        public override string ModelSummaryInnerOpeningTags(bool formatForParentControl)
+        public override string ModelSummaryInnerOpeningTags()
         {
             using (StringWriter htmlWriter = new StringWriter())
             {
