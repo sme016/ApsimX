@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using APSIM.Shared.Documentation;
 using Models.Core;
 using Models.Interfaces;
 
@@ -70,6 +68,18 @@ namespace Models.Functions.SupplyFunctions
         }
 
         /// <summary>
+        /// Combined stress effects on biomass production
+        /// </summary>
+        /// <value>The rue act.</value>
+        public double RueReductionFactor
+        {
+            get
+            {
+                return Math.Min(FT.Value(), Math.Min(FN.Value(), FVPD.Value())) * FW.Value() * FCO2.Value();
+            }
+        }
+
+        /// <summary>
         /// Total plant "actual" radiation use efficiency (for the day) corrected by reducing factors (g biomass/MJ global solar radiation) CHCK-EIT
         /// </summary>
         /// <value>The rue act.</value>
@@ -78,7 +88,6 @@ namespace Models.Functions.SupplyFunctions
         {
             get
             {
-                double RueReductionFactor = Math.Min(FT.Value(), Math.Min(FN.Value(), FVPD.Value())) * FW.Value() * FCO2.Value();
                 return RUE.Value() * RueReductionFactor;
             }
         }
@@ -92,17 +101,6 @@ namespace Models.Functions.SupplyFunctions
             if (radiationInterception < -0.000000000001)
                 throw new Exception("Negative Radiation interception value supplied to RUE model");
             return radiationInterception * RueAct;
-        }
-
-        /// <summary>Document the model.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // Write description of this class from summary and remarks XML documentation.
-            foreach (var tag in GetModelDescription())
-                yield return tag;
-
-            foreach (var tag in DocumentChildren<IModel>())
-                yield return tag;
         }
     }
 }

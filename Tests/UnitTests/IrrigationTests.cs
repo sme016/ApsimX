@@ -1,16 +1,18 @@
-﻿namespace UnitTests
-{
-    using APSIM.Shared.Utilities;
-    using Models;
-    using Models.Core;
-    using Models.Soils;
-    using Models.Soils.Nutrients;
-    using Models.Surface;
-    using NUnit.Framework;
-    using System;
-    using System.Collections.Generic;
-    using UnitTests.Soils;
+﻿using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models;
+using Models.Core;
+using Models.Core.ApsimFile;
+using Models.Soils;
+using Models.Soils.Nutrients;
+using Models.Surface;
+using NUnit.Framework;
+using System;
+using System.Collections.Generic;
+using UnitTests.Soils;
 
+namespace UnitTests
+{
     public class IrrigationTests
     {
         [Test]
@@ -21,10 +23,10 @@
             var events = new Events(zone);
             var args = new object[] { this, new EventArgs() };
             events.Publish("Commencing", args);
-            events.Publish("StartOfSimulation", args); 
+            events.Publish("StartOfSimulation", args);
             events.Publish("DoDailyInitialisation", args);
 
-            var soilWater = zone.Children[1].Children[4] as Models.WaterModel.WaterBalance;
+            var soilWater = zone.Children[1].Children[7] as Models.WaterModel.WaterBalance;
             var swBeforeIrrigation = MathUtilities.Sum(soilWater.SWmm);
             var irrigation = zone.Children[0] as Irrigation;
 
@@ -32,7 +34,7 @@
             events.Publish("DoSoilWaterMovement", args);
             var amountSWHasIncreased = MathUtilities.Sum(soilWater.SWmm) - swBeforeIrrigation;
 
-            Assert.AreEqual(amountSWHasIncreased, 10);
+            Assert.That(amountSWHasIncreased, Is.EqualTo(10));
         }
 
         [Test]
@@ -46,7 +48,7 @@
             events.Publish("StartOfSimulation", args);
             events.Publish("DoDailyInitialisation", args);
 
-            var soilWater = zone.Children[1].Children[4] as Models.WaterModel.WaterBalance;
+            var soilWater = zone.Children[1].Children[7] as Models.WaterModel.WaterBalance;
             var swBeforeIrrigation = MathUtilities.Sum(soilWater.SWmm);
             var irrigation = zone.Children[0] as Irrigation;
 
@@ -54,7 +56,7 @@
             events.Publish("DoSoilWaterMovement", args);
             var amountSWHasIncreased = MathUtilities.Sum(soilWater.SWmm) - swBeforeIrrigation;
 
-            Assert.AreEqual(amountSWHasIncreased, 5);
+            Assert.That(amountSWHasIncreased, Is.EqualTo(5));
         }
 
 
@@ -93,18 +95,38 @@
                                 Thickness = new double[] { 100, 300, 300, 300, 300, 300 },
                                 Carbon = new double[] { 2, 1, 0.5, 0.4, 0.3, 0.2 }
                             },
-                            new Chemical()
+                            new Solute
                             {
+                                Name = "CL",
                                 Thickness = new double[] { 100, 300, 300, 300, 300, 300 },
-                                CL = new double[] { 38, double.NaN, 500, 490, 500, 500 }
+                                InitialValues = new double[] { 38, double.NaN, 500, 490, 500, 500 },
+                                InitialValuesUnits = Solute.UnitsEnum.ppm
                             },
-                            new Sample()
+                            new Solute
+                            {
+                                Name = "NO3",
+                                Thickness = new double[] { 100, 300, 300, 300, 300, 300 },
+                                InitialValues = new double[] { 23, 7, 2, 1, 1, 1 },
+                                InitialValuesUnits = Solute.UnitsEnum.kgha
+                            },
+                            new Solute
+                            {
+                                Name = "NH4",
+                                Thickness = new double[] { 100, 300, 300, 300, 300, 300 },
+                                InitialValues = new double[] { 23, 7, 2, 1, 1, 1 },
+                                InitialValuesUnits = Solute.UnitsEnum.kgha
+                            },
+                            new Solute
+                            {
+                                Name = "Urea",
+                                Thickness = new double[] { 100, 300, 300, 300, 300, 300 },
+                                InitialValues = new double[] { 0, 0, 0, 0, 0, 0 },
+                                InitialValuesUnits = Solute.UnitsEnum.kgha
+                            },
+                            new Water()
                             {
                                 Thickness = new double[] { 100, 300, 300, 300, 300, 300  },
-                                SW = new double[] { 0.103, 0.238, 0.253, 0.261, 0.261, 0.261 },
-                                NO3 = new double[] { 23, 7, 2, 1, 1, 1 },
-                                OC = new double[] { 1.35, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN },
-                                SWUnits = Sample.SWUnitsEnum.Gravimetric
+                                InitialValues = new double[] { 0.103, 0.238, 0.253, 0.261, 0.261, 0.261 },
                             },
                             new Models.WaterModel.WaterBalance()
                             {
@@ -125,16 +147,16 @@
                             {
                                 Children = new List<IModel>()
                                 {
-                                    new MockNutrientPool() { Name = "Inert" },
-                                    new MockNutrientPool() { Name = "Microbial" },
-                                    new MockNutrientPool() { Name = "Humic" },
-                                    new MockNutrientPool() { Name = "FOMCellulose" },
-                                    new MockNutrientPool() { Name = "FOMCarbohydrate" },
-                                    new MockNutrientPool() { Name = "FOMLignin" },
-                                    new MockNutrientPool() { Name = "SurfaceResidue" },
-                                    new Solute() { Name = "NO3" },
-                                    new Solute() { Name = "NH4" },
-                                    new Solute() { Name = "Urea"}
+                                    new OrganicPool() { Name = "Inert" },
+                                    new OrganicPool() { Name = "Microbial" },
+                                    new OrganicPool() { Name = "Humic" },
+                                    new OrganicPool() { Name = "FOMCellulose" },
+                                    new OrganicPool() { Name = "FOMCarbohydrate" },
+                                    new OrganicPool() { Name = "FOMLignin" },
+                                    new OrganicPool() { Name = "SurfaceResidue" },
+                                    new NFlow() { Name = "Hydrolysis" },
+                                    new NFlow() { Name = "Denitrification" },
+                                    new NFlow() { Name = "Nitrification" },
                                 }
                             },
                             new MockSoilTemperature(),
@@ -160,6 +182,8 @@
                     }
                 }
             };
+            Resource.Instance.Replace(zone);
+            FileFormat.InitialiseModel(zone, (e) => throw e);
 
             zone.ParentAllDescendants();
             foreach (IModel model in zone.FindAllDescendants())
@@ -168,6 +192,10 @@
             links.Resolve(zone, true);
             var events = new Events(zone);
             events.ConnectEvents();
+
+            var soil = zone.Children[1] as Soil;
+            soil.Sanitise();
+
             return zone;
         }
     }

@@ -1,7 +1,8 @@
-﻿using APSIM.Shared.Utilities;
+﻿using System;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
 using Models.Core;
 using Models.PMF.Interfaces;
-using System;
 
 namespace Models.PMF.Arbitrator
 {
@@ -14,7 +15,7 @@ namespace Models.PMF.Arbitrator
         /// <summary>Does the fixation.</summary>
         /// <param name="Organs">The organs.</param>
         /// <param name="DM">The bat.</param>
-        /// <param name="arbitrationMethod">The option.</param> not used 
+        /// <param name="arbitrationMethod">The option.</param> not used
         public void Calculate(IArbitration[] Organs, BiomassArbitrationType DM, IArbitrationMethod arbitrationMethod)
         {
             //  Allocate to meet Organs demands

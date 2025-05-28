@@ -1,18 +1,21 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Data;
+using System.Globalization;
+using System.Linq;
+using System.Reflection;
+using APSIM.Shared.Extensions.Collections;
+using APSIM.Shared.Utilities;
+using Models;
+using Models.Core;
+using Models.LifeCycle;
+using Models.Management;
+using Models.PMF;
+using Models.Storage;
+using Models.Surface;
 namespace UserInterface.Classes
 {
-    using System;
-    using System.Collections;
-    using System.Collections.Generic;
-    using System.Globalization;
-    using System.Linq;
-    using System.Reflection;
-    using APSIM.Shared.Extensions.Collections;
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.LifeCycle;
-    using Models.Storage;
-    using Models.Surface;
-
     public enum PropertyType
     {
         SingleLineText,
@@ -20,69 +23,14 @@ namespace UserInterface.Classes
         DropDown,
         Checkbox,
         Colour,
+        ColourPicker,
         File,
         Files,
         Directory,
         //Directories,
         Font,
-        Numeric
-    }
-
-    /// <summary>
-    /// Represents all properties of an object, as they are to be displayed
-    /// in the UI for editing.
-    /// </summary>
-    public class PropertyGroup
-    {
-        /// <summary>
-        /// Name of the property group.
-        /// </summary>
-        public string Name { get; set; }
-
-        /// <summary>
-        /// Properties belonging to the model.
-        /// </summary>
-        public IEnumerable<Property> Properties { get; private set; }
-
-        /// <summary>
-        /// Properties belonging to properties of the model marked with
-        /// DisplayType.SubModel.
-        /// </summary>
-        public IEnumerable<PropertyGroup> SubModelProperties { get; private set; }
-
-        /// <summary>
-        /// Constructs a property group.
-        /// </summary>
-        /// <param name="name">Name of the property group.</param>
-        /// <param name="properties">Properties belonging to the model.</param>
-        /// <param name="subProperties">Property properties.</param>
-        public PropertyGroup(string name, IEnumerable<Property> properties, IEnumerable<PropertyGroup> subProperties)
-        {
-            Name = name;
-            Properties = properties;
-            SubModelProperties = subProperties ?? new PropertyGroup[0];
-        }
-
-        /// <summary>
-        /// Returns the total number of properties in this property group and sub property groups.
-        /// </summary>
-        public int Count()
-        {
-            return Properties.Count() + SubModelProperties?.Sum(p => p.Count()) ?? 0;
-        }
-
-        public Property Find(Guid id)
-        {
-            return GetAllProperties().FirstOrDefault(p => p.ID == id);
-        }
-
-        public IEnumerable<Property> GetAllProperties()
-        {
-            foreach (Property property in Properties)
-                yield return property;
-            foreach (Property property in SubModelProperties.SelectMany(g => g.GetAllProperties()))
-                yield return property;
-        }
+        Numeric,
+        Code
     }
 
     /// <summary>
@@ -133,6 +81,16 @@ namespace UserInterface.Classes
         public string[] DropDownOptions { get; private set; }
 
         /// <summary>
+        /// If false, the widget shown in the GUI for this property will be disabled.
+        /// </summary>
+        public bool Enabled { get; private set; }
+
+        /// <summary>
+        /// If false, the widget will not be shown in the GUI for this property.
+        /// </summary>
+        public bool Visible { get; private set; }
+
+        /// <summary>
         /// Constructor.
         /// </summary>
         public Property(string name, string tooltip, object value, PropertyType displayType, IEnumerable<string> dropDownOptions = null, IEnumerable<string> separators = null)
@@ -144,6 +102,8 @@ namespace UserInterface.Classes
             DisplayMethod = displayType;
             DropDownOptions = dropDownOptions?.ToArray();
             Separators = separators?.ToList();
+            Enabled = true;
+            Visible = true;
         }
 
         /// <summary>
@@ -159,6 +119,13 @@ namespace UserInterface.Classes
             Name = metadata.GetCustomAttribute<DescriptionAttribute>()?.ToString();
             if (string.IsNullOrEmpty(Name))
                 Name = metadata.Name;
+            string units = metadata.GetCustomAttribute<UnitsAttribute>()?.ToString();
+            if (!string.IsNullOrEmpty(units))
+            {
+                units = "(" + units + ")";
+                if (!Name.Contains(units))
+                    Name += " " + units;
+            }
 
             Tooltip = metadata.GetCustomAttribute<TooltipAttribute>()?.Tooltip;
             Separators = metadata.GetCustomAttributes<SeparatorAttribute>()?.Select(s => s.ToString())?.ToList();
@@ -184,6 +151,72 @@ namespace UserInterface.Classes
             if (displayType == DisplayType.None && !string.IsNullOrEmpty(attrib?.Values))
                 displayType = DisplayType.DropDown;
 
+            if (attrib != null && !string.IsNullOrEmpty(attrib.VisibleCallback))
+            {
+                BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
+                MethodInfo method = metadata.DeclaringType.GetMethod(attrib.VisibleCallback, flags);
+                if (method == null)
+                {
+                    // Try a property with this name.
+                    PropertyInfo visibleProperty = metadata.DeclaringType.GetProperty(attrib.VisibleCallback, flags);
+                    if (visibleProperty == null)
+                        throw new InvalidOperationException($"Unable to evaluate visible callback {attrib.VisibleCallback} for property {metadata.Name} on type {metadata.DeclaringType.FullName} - method or property does not exist");
+
+                    if (visibleProperty.PropertyType != typeof(bool))
+                        throw new InvalidOperationException($"Property {visibleProperty.Name} is not a valid enabled callback, because it has a return type of {visibleProperty.PropertyType}. It should have a bool return type.");
+                    if (!visibleProperty.CanRead)
+                        throw new InvalidOperationException($"Property {visibleProperty.Name} is not a valid enabled callback, because it does not have a get accessor.");
+
+                    Visible = (bool)visibleProperty.GetValue(obj);
+                }
+                else
+                {
+                    if (method.ReturnType != typeof(bool))
+                        throw new InvalidOperationException($"Method {metadata.Name} is not a valid enabled callback, because it has a return type of {method.ReturnType}. It should have a bool return type.");
+                    ParameterInfo[] parameters = method.GetParameters();
+                    List<ParameterInfo> nonOptionalParameters = parameters.Where(p => !p.IsOptional).ToList();
+                    if (nonOptionalParameters.Count != 0)
+                        throw new InvalidOperationException($"Method {metadata.Name} is not a valid enabled callback, because it takes {nonOptionalParameters.Count} non-optional arguments ({string.Join(", ", nonOptionalParameters.Select(p => p.Name))}). It should take 0 arguments");
+
+                    Visible = (bool)method.Invoke(obj, null);
+                }
+            }
+            else
+                Visible = true;
+
+            if (attrib != null && !string.IsNullOrEmpty(attrib.EnabledCallback))
+            {
+                BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
+                MethodInfo method = metadata.DeclaringType.GetMethod(attrib.EnabledCallback, flags);
+                if (method == null)
+                {
+                    // Try a property with this name.
+                    PropertyInfo enabledProperty = metadata.DeclaringType.GetProperty(attrib.EnabledCallback, flags);
+                    if (enabledProperty == null)
+                        throw new InvalidOperationException($"Unable to evaluate enabled callback {attrib.EnabledCallback} for property {metadata.Name} on type {metadata.DeclaringType.FullName} - method or property does not exist");
+
+                    if (enabledProperty.PropertyType != typeof(bool))
+                        throw new InvalidOperationException($"Property {enabledProperty.Name} is not a valid enabled callback, because it has a return type of {enabledProperty.PropertyType}. It should have a bool return type.");
+                    if (!enabledProperty.CanRead)
+                        throw new InvalidOperationException($"Property {enabledProperty.Name} is not a valid enabled callback, because it does not have a get accessor.");
+
+                    Enabled = (bool)enabledProperty.GetValue(obj);
+                }
+                else
+                {
+                    if (method.ReturnType != typeof(bool))
+                        throw new InvalidOperationException($"Method {metadata.Name} is not a valid enabled callback, because it has a return type of {method.ReturnType}. It should have a bool return type.");
+                    ParameterInfo[] parameters = method.GetParameters();
+                    List<ParameterInfo> nonOptionalParameters = parameters.Where(p => !p.IsOptional).ToList();
+                    if (nonOptionalParameters.Count != 0)
+                        throw new InvalidOperationException($"Method {metadata.Name} is not a valid enabled callback, because it takes {nonOptionalParameters.Count} non-optional arguments ({string.Join(", ", nonOptionalParameters.Select(p => p.Name))}). It should take 0 arguments");
+
+                    Enabled = (bool)method.Invoke(obj, null);
+                }
+            }
+            else
+                Enabled = true;
+
             switch (displayType)
             {
                 case DisplayType.None:
@@ -203,7 +236,6 @@ namespace UserInterface.Classes
                                                .Where(m => metadata.PropertyType.IsAssignableFrom(m.GetType()))
                                                .Select(m => m.Name)
                                                .ToArray();
-
                     }
                     else if (metadata.PropertyType == typeof(bool))
                         DisplayMethod = PropertyType.Checkbox;
@@ -211,6 +243,12 @@ namespace UserInterface.Classes
                         DisplayMethod = PropertyType.Colour;
                     else
                         DisplayMethod = PropertyType.SingleLineText;
+                    break;
+                case DisplayType.Code:
+                    DisplayMethod = PropertyType.Code;
+                    break;
+                case DisplayType.ColourPicker:
+                    DisplayMethod = PropertyType.ColourPicker;
                     break;
                 case DisplayType.FileName:
                     DisplayMethod = PropertyType.File;
@@ -249,6 +287,14 @@ namespace UserInterface.Classes
                         plant = model.FindInScope<IPlant>();
                     if (plant != null)
                         DropDownOptions = PropertyPresenterHelpers.GetCultivarNames(plant);
+                    else
+                        DropDownOptions = new string[] { };
+                    break;
+                case DisplayType.SCRUMcropName:
+                    DisplayMethod = PropertyType.DropDown;
+                    Zone zoney = model.FindInScope<Zone>();
+                    if (zoney != null)
+                        DropDownOptions = PropertyPresenterHelpers.GetSCRUMcropNames(zoney);
                     break;
                 case DisplayType.TableName:
                     DisplayMethod = PropertyType.DropDown;
@@ -267,6 +313,34 @@ namespace UserInterface.Classes
                     Zone zone = model.FindInScope<Zone>();
                     if (zone != null)
                         DropDownOptions = PropertyPresenterHelpers.GetLifeCycleNames(zone);
+                    break;
+                case DisplayType.CropStageName:
+                    DisplayMethod = PropertyType.DropDown;
+                    Plant planty = model.FindInScope<Plant>();
+                    if (model.GetType().Name == "BiomassRemovalEvents")
+                        planty = ((BiomassRemovalEvents)model).PlantInstanceToRemoveFrom;
+                    if (planty != null)
+                        DropDownOptions = PropertyPresenterHelpers.GetCropStageNames(planty);
+                    break;
+                case DisplayType.CSVCrops:
+                    DisplayMethod = PropertyType.DropDown;
+                    PropertyInfo namesPropInfo = model.GetType().GetProperty("CropNames");
+                    string[] names = namesPropInfo?.GetValue(model) as string[] ;
+                    if (names != null)
+                        DropDownOptions = names;
+                    break;
+                case DisplayType.CropPhaseName:
+                    DisplayMethod = PropertyType.DropDown;
+                    Plant plantyy = model.FindInScope<Plant>();
+                    if (plantyy != null)
+                        DropDownOptions = PropertyPresenterHelpers.GetCropPhaseNames(plantyy);
+                    break;
+                case DisplayType.PlantOrganList:
+                    DisplayMethod = PropertyType.DropDown;
+                    Zone zone1 = model.FindAncestor<Zone>();
+                    List<Plant> plants = zone1.FindAllChildren<Plant>().ToList();
+                    if (plants != null)
+                        DropDownOptions = PropertyPresenterHelpers.GetPlantOrgans(plants);
                     break;
                 case DisplayType.LifePhaseName:
                     DisplayMethod = PropertyType.DropDown;
@@ -307,11 +381,35 @@ namespace UserInterface.Classes
                     }
                     else
                         throw new NotImplementedException($"Display type {displayType} is only supported on models of type {typeof(SurfaceOrganicMatter).Name}, but model is of type {model.GetType().Name}.");
+                case DisplayType.FertiliserType:
+                    var fertiliser = model.FindInScope<Fertiliser>();
+                    if (fertiliser != null)
+                    {
+                        DisplayMethod = PropertyType.DropDown;
+                        DropDownOptions = fertiliser.FindAllChildren<FertiliserType>()
+                                                    .Select(c => c.Name).ToArray();
+                    }
+                    break;
                 case DisplayType.MultiLineText:
                     DisplayMethod = PropertyType.MultiLineText;
                     if (Value is IEnumerable enumerable && metadata.PropertyType != typeof(string))
                         Value = string.Join(Environment.NewLine, ((IEnumerable)metadata.GetValue(obj)).ToGenericEnumerable());
                     break;
+                case DisplayType.ScrumEstablishStages:
+                    DisplayMethod = PropertyType.DropDown;
+                    DropDownOptions = new string[3] { "Seed", "Emergence", "Seedling" };
+                    break;
+                case DisplayType.ScrumHarvestStages:
+                    DisplayMethod = PropertyType.DropDown;
+                    DropDownOptions = new string[6] { "Vegetative", "EarlyReproductive", "MidReproductive", "LateReproductive", "Maturity", "Ripe" };
+                    break;
+                case DisplayType.PlantName:
+                    DisplayMethod = PropertyType.DropDown;
+                    var plantModels = model.FindAllInScope<Plant>();
+                    if (plantModels != null)
+                        DropDownOptions = plantModels.Select(plant => plant.Name).ToArray();
+                    break;
+
                 // Should never happen - presenter should handle this(?)
                 //case DisplayType.SubModel:
                 default:

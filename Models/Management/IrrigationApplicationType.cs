@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
 namespace Models.Soils
 {
@@ -14,6 +11,8 @@ namespace Models.Soils
         public double Amount;
         /// <summary>The depth of application (mm).</summary>
         public double Depth;
+        /// <summary>The time of irrigation event (minutes).</summary>
+        public string Time;
         /// <summary>The duration of irrigation event (minutes).</summary>
         public double Duration;
         /// <summary>Whether irrigation can run off.</summary>

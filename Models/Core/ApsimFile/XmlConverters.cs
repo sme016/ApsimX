@@ -1,18 +1,16 @@
-﻿
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Xml;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
 
 namespace Models.Core.ApsimFile
 {
-    using APSIM.Shared.Utilities;
-    using Models.Factorial;
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.Globalization;
-    using System.IO;
-    using System.Linq;
-    using System.Reflection;
-    using System.Xml;
-    using static Models.Factorial.Factor;
 
     /// <summary>
     /// Contains all converters that convert from one XML version to another.
@@ -266,7 +264,7 @@ namespace Models.Core.ApsimFile
             ConverterUtilities.RenameNode(node, "NonStructuralNRetrasnlocated", "StorageNRetrasnlocated");
         }
 
-        /// <summary> Rename MainStemNodeAppearanceRate to Phyllochron AND 
+        /// <summary> Rename MainStemNodeAppearanceRate to Phyllochron AND
         ///        MainStemFinalNodeNumber to FinalLeafNumber in Structure </summary>
         private static void UpgradeToVersion12(XmlNode node, string fileName)
         {
@@ -311,7 +309,7 @@ namespace Models.Core.ApsimFile
                 try
                 {
                     DataTable tableData = connection.ExecuteQuery("SELECT * FROM sqlite_master");
-                    foreach (string tableName in DataTableUtilities.GetColumnAsStrings(tableData, "Name"))
+                    foreach (string tableName in DataTableUtilities.GetColumnAsStrings(tableData, "Name", CultureInfo.InvariantCulture))
                     {
                         if (tableName == "Simulations" || tableName == "Messages" || tableName == "InitialConditions")
                             connection.ExecuteNonQuery("ALTER TABLE " + tableName + " RENAME TO " + "_" + tableName);
@@ -623,7 +621,7 @@ namespace Models.Core.ApsimFile
                 try
                 {
                     DataTable tableData = connection.ExecuteQuery("SELECT * FROM sqlite_master");
-                    List<string> tableNames = DataTableUtilities.GetColumnAsStrings(tableData, "Name").ToList();
+                    List<string> tableNames = DataTableUtilities.GetColumnAsStrings(tableData, "Name", CultureInfo.InvariantCulture).ToList();
                     if (!tableNames.Contains("_Checkpoints"))
                     {
                         connection.ExecuteNonQuery("BEGIN");
@@ -1084,7 +1082,7 @@ namespace Models.Core.ApsimFile
 
                     var childType = FindChildTypeFromName(childName, baseSimulations[0]);
 
-                    
+
                     foreach (XmlNode child in XmlUtilities.ChildNodes(factorNode, childType))
                         pairs.Add(new PathValuesPair() { path = specification, value = XmlUtilities.Value(child, "Name") });
                 }
@@ -1333,21 +1331,21 @@ namespace Models.Core.ApsimFile
 
             //Add Structural demand function
             XmlNode structural = XmlUtilities.CreateNode(node.OwnerDocument, "MultiplyFunction", "Structural");
-            ConverterUtilities.AddVariableReferenceFuntionIfNotExists(structural, "MinNconc", "[" + organNode.FirstChild.InnerText + "].minimumNconc.Value()");
+            ConverterUtilities.AddVariableReferenceFuntionIfNotExists(structural, "MinNConc", "[" + organNode.FirstChild.InnerText + "].minimumNConc.Value()");
             ConverterUtilities.AddVariableReferenceFuntionIfNotExists(structural, "PotentialDMAllocation", "[" + organNode.FirstChild.InnerText + "].potentialDMAllocation.Structural");
             NDemands.AppendChild(structural);
             //Add Metabolic Demand function
             XmlNode metabolic = XmlUtilities.CreateNode(node.OwnerDocument, "MultiplyFunction", "Metabolic");
-            XmlNode CritN = XmlUtilities.CreateNode(node.OwnerDocument, "SubtractFunction", "MetabolicNconc");
-            ConverterUtilities.AddVariableReferenceFuntionIfNotExists(CritN, "CritNconc", "[" + organNode.FirstChild.InnerText + "].criticalNConc.Value()");
-            ConverterUtilities.AddVariableReferenceFuntionIfNotExists(CritN, "MinNconc", "[" + organNode.FirstChild.InnerText + "].minimumNconc.Value()");
+            XmlNode CritN = XmlUtilities.CreateNode(node.OwnerDocument, "SubtractFunction", "MetabolicNConc");
+            ConverterUtilities.AddVariableReferenceFuntionIfNotExists(CritN, "CritNConc", "[" + organNode.FirstChild.InnerText + "].criticalNConc.Value()");
+            ConverterUtilities.AddVariableReferenceFuntionIfNotExists(CritN, "MinNConc", "[" + organNode.FirstChild.InnerText + "].minimumNConc.Value()");
             metabolic.AppendChild(CritN);
             ConverterUtilities.AddVariableReferenceFuntionIfNotExists(metabolic, "PotentialDMAllocation", "[" + organNode.FirstChild.InnerText + "].potentialDMAllocation.Structural");
             NDemands.AppendChild(metabolic);
             //Add Storage Demand function
             XmlNode Storage = XmlUtilities.CreateNode(node.OwnerDocument, "StorageNDemandFunction", "Storage");
             ConverterUtilities.AddVariableReferenceFuntionIfNotExists(Storage, "NitrogenDemandSwitch", "[" + organNode.FirstChild.InnerText + "].nitrogenDemandSwitch.Value()");
-            ConverterUtilities.AddVariableReferenceFuntionIfNotExists(Storage, "MaxNconc", "[" + organNode.FirstChild.InnerText + "].maximumNconc.Value()");
+            ConverterUtilities.AddVariableReferenceFuntionIfNotExists(Storage, "MaxNConc", "[" + organNode.FirstChild.InnerText + "].maximumNConc.Value()");
             NDemands.AppendChild(Storage);
         }
 

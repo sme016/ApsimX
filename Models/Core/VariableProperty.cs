@@ -1,17 +1,20 @@
-﻿namespace Models.Core
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Reflection;
+using APSIM.Shared.Utilities;
+using APSIM.Shared.Documentation;
+using Models.Soils;
+using APSIM.Numerics;
+
+namespace Models.Core
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Linq;
-    using System.Reflection;
-    using Models.Soils;
-    using System.Globalization;
-    using APSIM.Shared.Utilities;
-    using System.Collections;
 
     /// <summary>
     /// Encapsulates a discovered property of a model. Provides properties for
-    /// returning information about the property. 
+    /// returning information about the property.
     /// </summary>
     [Serializable]
     public class VariableProperty : IVariable
@@ -301,11 +304,6 @@
                     return true;
                 }
 
-                if (this.Metadata.Contains("Estimated") || this.Metadata.Contains("Calculated"))
-                {
-                    return true;
-                }
-
                 return false;
             }
         }
@@ -362,7 +360,7 @@
                     obj = ProcessPropertyOfArrayElement();
                 else
                     obj = this.property.GetValue(this.Object, null);
-                if (lowerArraySpecifier != 0 || upperArraySpecifier != 0)
+                if (obj != null && (lowerArraySpecifier != 0 || upperArraySpecifier != 0))
                 {
                     if (obj is IList array)
                     {
@@ -413,7 +411,7 @@
                         throw new Exception($"Array index {index} is invalid for {property.Name} ({property.Name} is not an array)");
                     }
                 }
-                
+
 
                 return obj;
             }
@@ -442,17 +440,31 @@
                             }
                             if (newValue is string str && targetType != typeof(string))
                                 newValue = ReflectionUtilities.StringToObject(targetType, str);
+                            else if (!(newValue is string) && targetType == typeof(string))
+                                newValue = ReflectionUtilities.ObjectToString(newValue);
                             array[i - 1] = newValue; // this will modify obj as well
                         }
                     }
-                    this.property.SetValue(this.Object, obj, null);
+                    if (this.property.CanWrite)
+                        this.property.SetValue(this.Object, obj, null);
+                    else if (this.property.CanRead)
+                        throw new Exception($"{this.property.Name} is read only and cannot be written to.");
+                    else
+                        throw new Exception($"{this.property.Name} cannot be read or written to.");
                 }
                 else if (value is string)
                 {
                     this.SetFromString(value as string);
                 }
                 else
-                    this.property.SetValue(this.Object, value, null);
+                {
+                    if (this.property.CanWrite)
+                        this.property.SetValue(this.Object, value, null);
+                    else if (this.property.CanRead)
+                        throw new Exception($"{this.property.Name} is read only and cannot be written to.");
+                    else
+                        throw new Exception($"{this.property.Name} cannot be read or written to.");
+                }
             }
         }
 
@@ -504,7 +516,7 @@
         }
 
         /// <summary>
-        /// Returns the string representation of a scalar value. 
+        /// Returns the string representation of a scalar value.
         /// Uses InvariantCulture when converting doubles
         /// to ensure a consistent representation of Nan and Inf
         /// </summary>
@@ -619,7 +631,7 @@
         }
 
         /// <summary>
-        /// Gets the sum of all values in this array property if the property has been 
+        /// Gets the sum of all values in this array property if the property has been
         /// marked as [DisplayTotal]. Otherwise return double.Nan
         /// </summary>
         public double Total
@@ -669,7 +681,7 @@
                 }
                 else if (this.DataType == typeof(float[]))
                 {
-                    this.Value = MathUtilities.StringsToDoubles(stringValues).Cast<float>().ToArray();
+                    this.Value = Array.ConvertAll(MathUtilities.StringsToDoubles(stringValues), value => (float)value);
                 }
                 else if (this.DataType == typeof(int[]))
                 {
@@ -714,9 +726,13 @@
                 {
                     this.Value = Enum.Parse(this.DataType, value);
                 }
+                else if (this.DataType == typeof(Object))
+                {
+                    this.property.SetValue(this.Object, value, null);
+                }
                 else
                 {
-                    this.Value = value;
+                    throw new ApsimXException(null, "Invalid property type: " + this.DataType.ToString());
                 }
             }
         }
@@ -751,7 +767,7 @@
         }
 
         /// <summary>
-        /// Parse the specified object to an enum. 
+        /// Parse the specified object to an enum.
         /// Similar to Enum.Parse(), but this will check against the enum's description attribute.
         /// </summary>
         /// <param name="obj">Object to parse. Should probably be a string.</param>
@@ -802,9 +818,18 @@
         }
 
         /// <summary>Return the summary comments from the source code.</summary>
-        public override string Summary { get { return AutoDocumentation.GetSummary(property); } }
+        public override string Summary { get { return CodeDocumentation.GetSummary(property); } }
 
         /// <summary>Return the remarks comments from the source code.</summary>
-        public override string Remarks { get { return AutoDocumentation.GetRemarks(property); } }
+        public override string Remarks { get { return CodeDocumentation.GetRemarks(property); } }
+
+        /// <summary>Get the full name of the property.</summary>
+        public string GetFullName()
+        {
+            if (lowerArraySpecifier != 0 && upperArraySpecifier != 0)
+                return $"{Name}[{lowerArraySpecifier}:{upperArraySpecifier}]";
+            else
+                return Name;
+        }
     }
 }

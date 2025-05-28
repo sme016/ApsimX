@@ -1,20 +1,24 @@
-﻿namespace UserInterface.Presenters
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Data;
+using System.IO;
+using System.Linq;
+using APSIM.Shared.Documentation.Extensions;
+using APSIM.Shared.Graphing;
+using APSIM.Shared.Utilities;
+using UserInterface.EventArguments;
+using Models;
+using Models.Core;
+using Models.Storage;
+using UserInterface.Views;
+using UserInterface.Interfaces;
+using Configuration = Utility.Configuration;
+using APSIM.Numerics;
+
+namespace UserInterface.Presenters
 {
-    using System;
-    using System.Collections;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.Drawing;
-    using System.IO;
-    using System.Linq;
-    using APSIM.Shared.Utilities;
-    using EventArguments;
-    using Interfaces;
-    using Models.Core;
-    using Models;
-    using Models.Storage;
-    using Views;
-    using APSIM.Shared.Graphing;
+
 
     /// <summary>
     /// A presenter for a graph.
@@ -26,7 +30,7 @@
         /// </summary>
         [Link]
         private IDataStore storage = null;
-        
+
         /// <summary>The graph view</summary>
         private IGraphView graphView;
 
@@ -62,7 +66,6 @@
             graphView.OnAxisClick += OnAxisClick;
             graphView.OnLegendClick += OnLegendClick;
             graphView.OnCaptionClick += OnCaptionClick;
-            graphView.OnHoverOverPoint += OnHoverOverPoint;
             graphView.OnAnnotationClick += OnAnnotationClick;
             explorerPresenter.CommandHistory.ModelChanged += OnGraphModelChanged;
             this.graphView.AddContextAction("Copy graph to clipboard", CopyGraphToClipboard);
@@ -88,12 +91,14 @@
             graphView.OnAxisClick -= OnAxisClick;
             graphView.OnLegendClick -= OnLegendClick;
             graphView.OnCaptionClick -= OnCaptionClick;
-            graphView.OnHoverOverPoint -= OnHoverOverPoint;
             graphView.OnAnnotationClick -= OnAnnotationClick;
         }
 
         public void DrawGraph()
         {
+            if (graph.Parent is GraphPanel)
+                return;
+
             graphView.Clear();
             if (storage == null)
                 storage = graph.FindInScope<IDataStore>();
@@ -120,11 +125,15 @@
         /// <summary>Draw the graph on the screen.</summary>
         public void DrawGraph(IEnumerable<SeriesDefinition> definitions)
         {
+            explorerPresenter.MainPresenter.ClearStatusPanel();
             graphView.Clear();
             if (storage == null)
                 storage = graph.FindInScope<IDataStore>();
             if (graph != null && graph.Series != null)
             {
+                if (!definitions.Any() && Configuration.Settings.EnableGraphDebuggingMessages)
+                    explorerPresenter.MainPresenter.ShowMessage($"{this.graph.Name}: No data matches the properties and filters set for this graph", Simulation.MessageType.Warning, false);
+
                 foreach (SeriesDefinition definition in definitions)
                 {
                     DrawOnView(definition);
@@ -133,9 +142,43 @@
                 // Update axis maxima and minima
                 graphView.UpdateView();
 
-                // Format the axes.
-                foreach (APSIM.Shared.Graphing.Axis a in graph.Axis)
-                    FormatAxis(a);
+                //check if the axes are too small, update if so
+                AdjustAxesboundaries(definitions);
+
+                int pointsOutsideAxis = 0;
+                int pointsInsideAxis = 0;
+                foreach (SeriesDefinition definition in definitions)
+                {
+                    string seriesName = graph.Name;
+                    if (definition.Series != null)
+                        seriesName = graph.Name + " (" + definition.Series.Name + ")";
+
+                    double xMin = graphView.AxisMinimum(definition.XAxis);
+                    double xMax = graphView.AxisMaximum(definition.XAxis);
+                    int xNaNCount = 0;
+                    int yNaNCount = 0;
+                    int bothNaNCount = 0;
+                    double yMin = graphView.AxisMinimum(definition.YAxis);
+                    double yMax = graphView.AxisMaximum(definition.YAxis);
+
+                    List<double> valuesX = GetSeriesAsDoublesList(definition.X);
+                    List<double> valuesY = GetSeriesAsDoublesList(definition.Y);
+
+                    PerformPointErrorChecks(ref pointsOutsideAxis, ref pointsInsideAxis, xMin, xMax, ref xNaNCount, ref yNaNCount, ref bothNaNCount, yMin, yMax, valuesX, valuesY);
+                    if (Configuration.Settings.EnableGraphDebuggingMessages && xNaNCount == valuesX.Count || yNaNCount == valuesY.Count || bothNaNCount == valuesX.Count)
+                    {
+                        DisplayNaNWarnings(seriesName, xNaNCount, yNaNCount, bothNaNCount);
+                    }
+                }
+
+                if (pointsOutsideAxis > 0 && pointsInsideAxis == 0 && Configuration.Settings.EnableGraphDebuggingMessages)
+                {
+                    explorerPresenter.MainPresenter.ShowMessage($"{this.graph.Name}: No points are visible with current axis values.", Simulation.MessageType.Warning, false);
+                }
+                else if (pointsOutsideAxis > 0 && Configuration.Settings.EnableGraphDebuggingMessages)
+                {
+                    explorerPresenter.MainPresenter.ShowMessage($"{this.graph.Name}: {pointsOutsideAxis} points are outside of the provided graph axis. Adjust the minimums and maximums for the axis, or clear them to have them autocalculate and show everything.", Simulation.MessageType.Warning, false);
+                }
 
                 // Get a list of series annotations.
                 DrawOnView(graph.GetAnnotationsToGraph());
@@ -170,6 +213,133 @@
             }
         }
 
+        private void DisplayNaNWarnings(string seriesName, int xNaNCount, int yNaNCount, int bothNaNCount)
+        {
+            explorerPresenter.MainPresenter.ShowMessage($"{seriesName}: NaN Values found in points. These may be empty cells in the datastore.", Simulation.MessageType.Information, false);
+            if (xNaNCount > 0)
+                explorerPresenter.MainPresenter.ShowMessage($"{seriesName}: {xNaNCount} points where X is NaN, but Y is valid.", Simulation.MessageType.Information, false);
+            if (yNaNCount > 0)
+                explorerPresenter.MainPresenter.ShowMessage($"{seriesName}: {yNaNCount} points where Y is NaN, but X is valid.", Simulation.MessageType.Information, false);
+            if (bothNaNCount > 0)
+                explorerPresenter.MainPresenter.ShowMessage($"{seriesName}: {bothNaNCount} points where both values are NaN.", Simulation.MessageType.Information, false);
+        }
+
+        private static void PerformPointErrorChecks(ref int pointsOutsideAxis, ref int pointsInsideAxis, double xMin, double xMax, ref int xNaNCount, ref int yNaNCount, ref int bothNaNCount, double yMin, double yMax, List<double> valuesX, List<double> valuesY)
+        {
+            for (int i = 0; i < valuesX.Count; i++)
+            {
+                bool isOutside = false;
+                double x = valuesX[i];
+                double y = valuesY[i];
+                if (double.IsNaN(x) && !double.IsNaN(y))
+                {
+                    xNaNCount += 1;
+                }
+                else if (!double.IsNaN(x) && double.IsNaN(y))
+                {
+                    yNaNCount += 1;
+                }
+                else if (double.IsNaN(x) && double.IsNaN(y))
+                {
+                    bothNaNCount += 1;
+                }
+                else
+                {
+                    if (!double.IsNaN(xMin) && x < xMin)
+                        isOutside = true;
+                    if (!double.IsNaN(xMax) && x > xMax)
+                        isOutside = true;
+                    if (!double.IsNaN(yMin) && y < yMin)
+                        isOutside = true;
+                    if (!double.IsNaN(yMax) && y > yMax)
+                        isOutside = true;
+
+                    if (isOutside)
+                        pointsOutsideAxis += 1;
+                    else
+                        pointsInsideAxis += 1;
+                }
+            }
+        }
+
+        private static List<double> GetSeriesAsDoublesList(IEnumerable definitionAxis)
+        {
+            List<double> axisDoubles = new();
+            foreach (var axisValue in definitionAxis)
+            {
+                double axisDouble = 0;
+                if (axisValue is DateTime)
+                    axisDouble = ((DateTime)axisValue).ToOADate();
+                else if (axisValue is string)
+                    axisDouble = 0; //string axis are handled elsewhere, so just set this to 0
+                else
+                    axisDouble = Convert.ToDouble(axisValue);
+
+                axisDoubles.Add(axisDouble);
+            }
+            return axisDoubles;
+        }
+
+        private void AdjustAxesboundaries(IEnumerable<SeriesDefinition> definitions)
+        {
+            const double tolerance = 0.00001;
+            double xAxisLargestErrorValue = 0.0;
+            double yAxisLargestErrorValue = 0.0;
+            foreach (Axis axis in graph.Axis)
+            {
+                double minimum = graphView.AxisMinimum(axis.Position);
+                double maximum = graphView.AxisMaximum(axis.Position);
+                if (axis.Maximum - axis.Minimum < tolerance)
+                {
+                    axis.Minimum -= tolerance / 2;
+                    axis.Maximum += tolerance / 2;
+                }
+                // Add space for error bars if they exist for the axes
+                // Bottom axis (x)
+                if (axis.Position == AxisPosition.Bottom)
+                {
+                    // x is usually at the bottom.
+                    foreach (SeriesDefinition seriesDef in definitions)
+                    {
+                        if (seriesDef.XError != null)
+                        {
+                            double largestErrorValue = MathUtilities.Max(seriesDef.XError);
+                            if (largestErrorValue > xAxisLargestErrorValue)
+                                xAxisLargestErrorValue = largestErrorValue;
+                        }
+                    }
+                    // Add error values to min and max.
+                    if (xAxisLargestErrorValue != 0)
+                    {
+                        axis.Minimum = minimum - (xAxisLargestErrorValue / 2);
+                        axis.Maximum = maximum + (xAxisLargestErrorValue / 2);
+                    }
+
+                }
+                // Left axis (y)
+                if (axis.Position == AxisPosition.Left)
+                {
+                    // x is usually at the bottom.
+                    foreach (SeriesDefinition seriesDef in definitions)
+                    {
+                        if (seriesDef.YError != null)
+                        {
+                            double largestErrorValue = MathUtilities.Max(seriesDef.YError);
+                            if (largestErrorValue > yAxisLargestErrorValue)
+                                yAxisLargestErrorValue = largestErrorValue;
+                        }
+                    }
+                    // Add values to min and max.
+                    if (yAxisLargestErrorValue != 0)
+                    {
+                        axis.Minimum = minimum - (yAxisLargestErrorValue / 2);
+                        axis.Maximum = maximum + (yAxisLargestErrorValue / 2);
+                    }
+                }
+                FormatAxis(axis);
+            }
+        }
+
         /// <summary>Export the contents of this graph to the specified file.</summary>
         /// <param name="folder">The folder.</param>
         /// <returns>The file name</returns>
@@ -177,14 +347,13 @@
         {
             // The rectange numbers below are optimised for generation of PDF document
             // on a computer that has its display settings at 100%.
-            Rectangle r = new Rectangle(0, 0, 600, 450);
-            Bitmap img = new Bitmap(r.Width, r.Height);
-
-            graphView.Export(ref img, r, true);
+            System.Drawing.Rectangle r = new System.Drawing.Rectangle(0, 0, 600, 450);
+            Gdk.Pixbuf img;
+            graphView.Export(out img, r, true);
 
             string path = graph.FullPath.Replace(".Simulations.", string.Empty);
             string fileName = Path.Combine(folder, path + ".png");
-            img.Save(fileName, System.Drawing.Imaging.ImageFormat.Png);
+            img.Save(fileName, "png");
 
             return fileName;
         }
@@ -225,11 +394,8 @@
             {
                 try
                 {
-                    Color colour = definition.Colour;
-                    // If dark theme is active, and colour is black, use white instead.
-                    // This won't help at all if the colour is a dark grey.
-                    if (Utility.Configuration.Settings.DarkTheme && colour.R == 0 && colour.G == 0 && colour.B == 0)
-                        colour = Color.White;
+                    System.Drawing.Color colour = definition.Colour;
+
                     // Create the series and populate it with data.
                     if (definition.Type == SeriesType.Bar)
                     {
@@ -260,7 +426,8 @@
                                                     definition.LineThickness,
                                                     definition.MarkerSize,
                                                     definition.MarkerModifier,
-                                                    definition.ShowInLegend);
+                                                    definition.ShowInLegend,
+                                                    definition.SimulationNamesForEachPoint);
                     }
                     else if (definition.Type == SeriesType.Region)
                     {
@@ -335,7 +502,7 @@
                 IAnnotation annotation = annotations.ElementAt(i);
                 if (annotation is TextAnnotation textAnnotation)
                 {
-                    double interval = (maximumY - lowestAxisScale) / 15; // fit 8 annotations on graph.
+                    double interval = (maximumY - lowestAxisScale) / 8; // fit 8 annotations on graph.
 
                     object x, y;
                     bool leftAlign = textAnnotation.leftAlign;
@@ -375,7 +542,7 @@
                         y = textAnnotation.y;
                     }
 
-                    graphView.DrawText( textAnnotation.text,
+                    graphView.DrawText(textAnnotation.text,
                                         x,
                                         y,
                                         leftAlign,
@@ -383,18 +550,18 @@
                                         textAnnotation.textRotation,
                                         AxisPosition.Bottom,
                                         AxisPosition.Left,
-                                        Utility.Configuration.Settings.DarkTheme ? Color.White : textAnnotation.colour);
+                                        textAnnotation.colour);
                 }
                 else if (annotation is LineAnnotation lineAnnotation)
                 {
                     graphView.DrawLine(
-                                        lineAnnotation.x1, 
+                                        lineAnnotation.x1,
                                         lineAnnotation.y1,
-                                        lineAnnotation.x2, 
+                                        lineAnnotation.x2,
                                         lineAnnotation.y2,
-                                        lineAnnotation.type, 
+                                        lineAnnotation.type,
                                         lineAnnotation.thickness,
-                                        Utility.Configuration.Settings.DarkTheme ? Color.White : lineAnnotation.colour,
+                                        lineAnnotation.colour,
                                         lineAnnotation.InFrontOfSeries,
                                         lineAnnotation.ToolTip);
                 }
@@ -403,9 +570,6 @@
             }
         }
 
-        private void DefaultPositioning(double minimumX, double lowestAxisScale, double largestAxisScale, int i, TextAnnotation textAnnotation)
-        {
-                   }
 
         /// <summary>Format the specified axis.</summary>
         /// <param name="axis">The axis to format</param>
@@ -454,12 +618,15 @@
                 }
 
                 // Create a default title by appending all 'names' together.
-                title = StringUtilities.BuildString(titles.ToArray(), Environment.NewLine);
+                if (axis.LabelOnOneLine)
+                    title = StringUtilities.BuildString(titles.ToArray(), ", ");
+                else
+                    title = StringUtilities.BuildString(titles.ToArray(), Environment.NewLine);
             }
 
-            graphView.FormatAxis(axis.Position, title, axis.Inverted, axis.Minimum ?? double.NaN, axis.Maximum ?? double.NaN, axis.Interval ?? double.NaN, axis.CrossesAtZero);
+            graphView.FormatAxis(axis.Position, title, axis.Inverted, axis.Minimum ?? double.NaN, axis.Maximum ?? double.NaN, axis.Interval ?? double.NaN, axis.CrossesAtZero, axis.LabelOnOneLine);
         }
-        
+
         /// <summary>The graph model has changed.</summary>
         /// <param name="model">The model.</param>
         private void OnGraphModelChanged(object model)
@@ -477,7 +644,30 @@
                 CurrentPresenter.Detach();
             }
 
+            bool isXAxis = true;
+            if (axisType == AxisPosition.Left || axisType == AxisPosition.Right)
+                isXAxis = false;
+
+            bool isDateAxis = false;
+            foreach (SeriesDefinition definition in SeriesDefinitions)
+            {
+
+                if (isXAxis)
+                {
+                    foreach (var x in definition.X)
+                        if (x is DateTime)
+                            isDateAxis = true;
+                }
+                else
+                {
+                    foreach (var y in definition.Y)
+                        if (y is DateTime)
+                            isDateAxis = true;
+                }
+            }
+
             AxisPresenter axisPresenter = new AxisPresenter();
+            axisPresenter.SetAsDateAxis(isDateAxis);
             CurrentPresenter = axisPresenter;
             AxisView a = new AxisView(graphView as GraphView);
             string dimension = (axisType == AxisPosition.Left || axisType == AxisPosition.Right) ? "Y" : "X";
@@ -591,7 +781,7 @@
         }
 
         /// <summary>
-        /// Look for the row in data that has the specified x and y. 
+        /// Look for the row in data that has the specified x and y.
         /// </summary>
         /// <param name="x">The x coordinate</param>
         /// <param name="y">The y coordinate</param>

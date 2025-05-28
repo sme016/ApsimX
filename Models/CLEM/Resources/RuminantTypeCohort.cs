@@ -1,17 +1,14 @@
+using Models.CLEM.Activities;
+using Models.CLEM.Interfaces;
+using Models.Core;
+using Models.Core.Attributes;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-
-using Newtonsoft.Json;
-using Models.Core;
 using System.ComponentModel.DataAnnotations;
-using Models.CLEM.Activities;
-using Models.Core.Attributes;
-using System.IO;
-using Models.CLEM.Groupings;
-using Models.CLEM.Interfaces;
 using System.Globalization;
+using System.IO;
+using System.Linq;
 
 namespace Models.CLEM.Resources
 {
@@ -23,7 +20,6 @@ namespace Models.CLEM.Resources
     [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(RuminantInitialCohorts))]
-    [ValidParent(ParentType = typeof(RuminantActivityTrade))]
     [ValidParent(ParentType = typeof(SpecifyRuminant))]
     [Description("Cohort component for specifying an individual during simulation or initalising the herd at the start")]
     [Version(1, 0, 3, "Includes set previous conception specification")]
@@ -54,6 +50,7 @@ namespace Models.CLEM.Resources
         /// </summary>
         [Description("Number of individuals")]
         [Required, GreaterThanEqualValue(0)]
+        [Core.Display(VisibleCallback = "DisplayNumber")]
         public double Number { get; set; }
 
         /// <summary>
@@ -84,6 +81,11 @@ namespace Models.CLEM.Resources
         [Description("Breeding sire?")]
         [Required]
         public bool Sire { get; set; }
+
+        /// <summary>
+        /// Display nuber of individuals
+        /// </summary>
+        public bool DisplayNumber { get { return Parent is RuminantInitialCohorts; } }
 
         /// <summary>
         /// Constructor
@@ -126,10 +128,13 @@ namespace Models.CLEM.Resources
         /// <param name="number">The number of individuals to create</param>
         /// <param name="initialAttributes">The initial attributes found from parent and this cohort</param>
         /// <param name="ruminantType">The breed parameters if overwritten</param>
+        /// <param name="getUniqueID">Switch to determine if unique id is assigned. Not needed when added to purchase list</param>
         /// <returns>List of ruminants</returns>
-        public List<Ruminant> CreateIndividuals(int number, List<ISetAttribute> initialAttributes, RuminantType ruminantType = null)
+        public List<Ruminant> CreateIndividuals(int number, List<ISetAttribute> initialAttributes, RuminantType ruminantType = null, bool getUniqueID = true)
         {
             List<Ruminant> individuals = new List<Ruminant>();
+            if (initialAttributes is null)
+                initialAttributes = new List<ISetAttribute>();
 
             if (number > 0)
             {
@@ -143,7 +148,7 @@ namespace Models.CLEM.Resources
                 for (int i = 1; i <= number; i++)
                 {
                     double weight = 0;
-                    if(Weight > 0)
+                    if (Weight > 0)
                     {
                         // avoid accidental small weight if SD provided but weight is 0
                         // if weight is 0 then the normalised weight will be applied in Ruminant constructor.
@@ -154,22 +159,25 @@ namespace Models.CLEM.Resources
                         weight = Weight + WeightSD * randStdNormal;
                     }
 
-                    Ruminant ruminant = Ruminant.Create(Sex, parent, Age, weight);          
+                    Ruminant ruminant = Ruminant.Create(Sex, parent, Age, weight);
 
-                    ruminant.ID = ruminantHerd.NextUniqueID;
+                    if (getUniqueID)
+                        ruminant.ID = ruminantHerd.NextUniqueID;
                     ruminant.Breed = parent.Breed;
                     ruminant.HerdName = parent.Name;
                     ruminant.SaleFlag = HerdChangeReason.None;
 
                     if (Suckling)
-                        if(Age >= ((parent.NaturalWeaningAge == 0)?parent.GestationLength: parent.NaturalWeaningAge))
+                    {
+                        if (Age >= ((parent.NaturalWeaningAge == 0) ? parent.GestationLength : parent.NaturalWeaningAge))
                         {
                             string limitstring = (parent.NaturalWeaningAge == 0) ? $"gestation length [{parent.GestationLength}]" : $"natural weaning age [{parent.NaturalWeaningAge}]";
                             string warn = $"Individuals older than {limitstring} cannot be assigned as suckling [r={parent.Name}][r={this.Parent.Name}][r={this.Name}]{Environment.NewLine}These individuals have not been assigned suckling.";
                             Warnings.CheckAndWrite(warn, Summary, this, MessageType.Warning);
                         }
-                        else
-                            ruminant.SetUnweaned();
+                    }
+                    else
+                        ruminant.Wean(false, "Initial state");
 
                     if (Sire)
                     {
@@ -200,7 +208,7 @@ namespace Models.CLEM.Resources
 
                     // initialise attributes
                     foreach (ISetAttribute item in initialAttributes)
-                        ruminant.Attributes.Add(item.AttributeName, item.GetAttribute(true));
+                        ruminant.AddNewAttribute(item);
 
                     individuals.Add(ruminant);
                 }
@@ -226,7 +234,7 @@ namespace Models.CLEM.Resources
                 if (!FormatForParentControl)
                 {
                     rumType = FindAncestor<RuminantType>();
-                    if(rumType is null)
+                    if (rumType is null)
                     {
                         // look for rum type in SpecifyRuminant
                         var specParent = this.FindAllAncestors<SpecifyRuminant>().FirstOrDefault();
@@ -332,17 +340,17 @@ namespace Models.CLEM.Resources
                             htmlWriter.Write("Normalised weight");
                             htmlWriter.Write("</span>");
                         }
-                        if(Sire || Suckling)
+                        if (Sire || Suckling)
                         {
                             htmlWriter.Write(" and ");
                             htmlWriter.Write(Sire ? "<span class=\"setvalue\">Sires</span>" : "");
                             if (Suckling)
-                                htmlWriter.Write($"<span class=\"{(Sire ? "errorlink":"setvalue")}\">Suckling</span>");
+                                htmlWriter.Write($"<span class=\"{(Sire ? "errorlink" : "setvalue")}\">Suckling</span>");
                         }
                         htmlWriter.Write("\r\n</div>");
                     }
                 }
-                return htmlWriter.ToString(); 
+                return htmlWriter.ToString();
             }
         }
 
@@ -361,12 +369,16 @@ namespace Models.CLEM.Resources
                             var newInd = Ruminant.Create(Sex, rumtype, Age);
 
                             string normWtString = newInd.NormalisedAnimalWeight.ToString("#,##0");
-                            if (Math.Abs(this.Weight - newInd.NormalisedAnimalWeight) / newInd.NormalisedAnimalWeight > 0.2)
+                            if (this.Weight != 0 && Math.Abs(this.Weight - newInd.NormalisedAnimalWeight) / newInd.NormalisedAnimalWeight > 0.2)
                             {
                                 normWtString = "<span class=\"errorlink\">" + normWtString + "</span>";
                                 (this.Parent as RuminantInitialCohorts).WeightWarningOccurred = true;
                             }
-                            htmlWriter.Write($"\r\n<tr{(this.Enabled ? "" : " class=\"disabled\"")}><td>" + this.Name + "</td><td><span class=\"setvalue\">" + this.Sex + "</span></td><td><span class=\"setvalue\">" + this.Age.ToString() + "</span></td><td><span class=\"setvalue\">" + this.Weight.ToString() + ((this.WeightSD > 0) ? " (" + this.WeightSD.ToString() + ")" : "") + "</spam></td><td>" + normWtString + "</td><td><span class=\"setvalue\">" + this.Number.ToString() + "</span></td><td" + ((this.Suckling) ? " class=\"fill\"" : "") + "></td><td" + ((this.Sire) ? " class=\"fill\"" : "") + "></td>");
+                            string weightstring = "";
+                            if (this.Weight > 0)
+                                weightstring = $"<span class=\"setvalue\">{this.Weight.ToString() + ((this.WeightSD > 0) ? " (" + this.WeightSD.ToString() + ")" : "")}</span>";
+
+                            htmlWriter.Write($"\r\n<tr{(this.Enabled ? "" : " class=\"disabled\"")}><td>{this.Name}</td><td><span class=\"setvalue\">{this.Sex}</span></td><td><span class=\"setvalue\">{this.Age.ToString()}</span></td><td>{weightstring}</td><td>{normWtString}</td><td><span class=\"setvalue\">{this.Number.ToString()}</span></td><td{((this.Suckling) ? " class=\"fill\"" : "")}></td><td{((this.Sire) ? " class=\"fill\"" : "")}></td>");
 
                             if ((Parent as RuminantInitialCohorts).ConceptionsFound)
                             {
@@ -400,7 +412,7 @@ namespace Models.CLEM.Resources
                 else
                     htmlWriter.Write("\r\n</div>");
 
-                return htmlWriter.ToString(); 
+                return htmlWriter.ToString();
             }
         }
 

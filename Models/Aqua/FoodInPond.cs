@@ -1,24 +1,18 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-
-
 using System.Collections;  //enumerator
-using Newtonsoft.Json;
-using System.Runtime.Serialization;
-using Models;
+using System.Collections.Generic;
 using Models.Core;
+using Newtonsoft.Json;
 using APSIM.Shared.Utilities;
-
+using APSIM.Numerics;
 
 namespace Models.Aqua
     {
 
     ///<summary>
-    /// Aquaculture Food in the Pond. 
+    /// Aquaculture Food in the Pond.
     /// Stores the different feeds that are in the pond.
-    ///</summary> 
+    ///</summary>
     [Serializable]
     [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
@@ -31,7 +25,7 @@ namespace Models.Aqua
 
         ///// <summary>The clock</summary>
         //[Link]
-        //private Clock Clock = null;
+        //private IClock Clock = null;
 
 
         ///// <summary>The summary</summary>
@@ -221,7 +215,7 @@ namespace Models.Aqua
         /// </summary>
         /// <param name="Name">Name of the Feed (case insensitive)</param>
         /// <returns>
-        /// The Feed with the specified Name. 
+        /// The Feed with the specified Name.
         /// If not found returns null.
         /// </returns>
         public Feed GetFeed(string Name)
@@ -285,7 +279,7 @@ namespace Models.Aqua
         /// Total Dry Matter in the food (kg)
         /// </summary>
         /// <value>
-        /// Summation of every type of feed in the food. 
+        /// Summation of every type of feed in the food.
         /// </value>
         [JsonIgnore]
         [Units("kg")]
@@ -335,7 +329,7 @@ namespace Models.Aqua
         /// Total Digestible Energy in the food (MJ)
         /// </summary>
         /// <value>
-        ///  Summation of every type of feed in the food. 
+        ///  Summation of every type of feed in the food.
         /// </value>
         [JsonIgnore]
         [Units("MJ")]
@@ -381,7 +375,7 @@ namespace Models.Aqua
 
         /// <summary>
         /// Names for each feed type in the pond
-        /// (This is for output only. You can not change these values) 
+        /// (This is for output only. You can not change these values)
         /// </summary>
         /// <value>
         /// returns an Array where each element is the name for a different feed in the pond.

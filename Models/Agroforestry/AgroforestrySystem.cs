@@ -1,15 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Data;
 using System.Linq;
-using System.Text;
+using System.Collections.Generic;
 using Models.Core;
 using Newtonsoft.Json;
-using Models.Interfaces;
-using APSIM.Shared.Utilities;
-using Models.Soils.Arbitrator;
-using Models.Zones;
-using APSIM.Shared.Documentation;
 
 namespace Models.Agroforestry
 {
@@ -140,12 +133,6 @@ namespace Models.Agroforestry
             else
                     return 1.0;
 
-        }
-
-        /// <summary>Writes documentation for this cultivar by adding to the list of documentation tags.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            throw new NotImplementedException("tbi");
         }
     }
 }

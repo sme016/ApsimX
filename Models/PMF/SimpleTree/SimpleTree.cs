@@ -1,14 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using Models.Core;
-using Models.Soils;
-using Newtonsoft.Json;
-using Models.Soils.Arbitrator;
-using Models.Interfaces;
+using APSIM.Numerics;
 using APSIM.Shared.Utilities;
-using Models.Soils.Nutrients;
+using Models.Core;
+using Models.Interfaces;
+using Models.Soils;
+using Models.Soils.Arbitrator;
+using Newtonsoft.Json;
 
 namespace Models.PMF
 {
@@ -36,7 +34,7 @@ namespace Models.PMF
 
         /// <summary>Gets the cover green.</summary>
         [Units("0-1")]
-        public double CoverGreen { get { return Math.Min(1.0 - Math.Exp(-0.5 * LAI),0.999999999); } }
+        public double CoverGreen { get { return Math.Min(1.0 - Math.Exp(-0.5 * LAI), 0.999999999); } }
 
         /// <summary>Gets the cover total.</summary>
         [Units("0-1")]
@@ -94,7 +92,7 @@ namespace Models.PMF
         ISoilWater waterBalance = null;
 
         /// <summary>The soil</summary>
-        [Link] 
+        [Link]
         private IPhysical soilPhysical = null;
 
         /// <summary>NO3 solute.</summary>
@@ -120,7 +118,7 @@ namespace Models.PMF
         public bool IsReadyForHarvesting { get { return false; } }
 
         /// <summary>Harvest the crop</summary>
-        public void Harvest() { }
+        public void Harvest(bool removeBiomassFromOrgans = true) { }
 
         /// <summary>End the crop</summary>
         public void EndCrop() { }
@@ -162,7 +160,7 @@ namespace Models.PMF
         /// <summary>The actual uptake of the plant</summary>
         /// <value>The uptake.</value>
         [JsonIgnore]
-        public double[] Uptake {get;set;}
+        public double[] Uptake { get; set; }
 
         /// <summary>Constructor</summary>
         public SimpleTree()
@@ -225,7 +223,7 @@ namespace Models.PMF
                 PotSWUptake[j] = Math.Max(0.0, RootProportion(j, RootDepth) * soilCrop.KL[j] * (MyZone.Water[j] - soilPhysical.LL15mm[j]));
 
             double TotPotSWUptake = MathUtilities.Sum(PotSWUptake);
-            
+
             for (int j = 0; j < soilPhysical.LL15.Length; j++)
                 SWUptake[j] = PotSWUptake[j] * Math.Min(1.0, PotentialEP / TotPotSWUptake);
 
@@ -309,7 +307,10 @@ namespace Models.PMF
         /// <param name="maxCover">The maximum cover.</param>
         /// <param name="budNumber">The bud number.</param>
         /// <param name="rowConfig">The row configuration.</param>
-        public void Sow(string cultivar, double population, double depth, double rowSpacing, double maxCover = 1, double budNumber = 1, double rowConfig = 1)
+        /// <param name="seeds">The number of seeds sown.</param>
+        /// <param name="tillering">tillering method (-1, 0, 1).</param>
+        /// <param name="ftn">Fertile Tiller Number.</param>
+        public void Sow(string cultivar, double population, double depth, double rowSpacing, double maxCover = 1, double budNumber = 1, double rowConfig = 1, double seeds = 0, int tillering = 0, double ftn = 0.0)
         {
 
         }

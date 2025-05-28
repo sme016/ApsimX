@@ -4,8 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Models.Core.Attributes;
 using System.IO;
@@ -49,7 +47,6 @@ namespace Models.CLEM.Activities
         public FinanceActivityPayExpense()
         {
             this.SetDefaults();
-            TransactionCategory = "Expense";
         }
 
         /// <summary>An event handler to allow us to initialise ourselves.</summary>
@@ -62,7 +59,7 @@ namespace Models.CLEM.Activities
         }
 
         /// <inheritdoc/>
-        public override List<ResourceRequest> GetResourcesNeededForActivity()
+        public override List<ResourceRequest> RequestResourcesForTimestep(double argument = 0)
         {
             List<ResourceRequest> resourcesNeeded = new List<ResourceRequest>
             {
@@ -80,6 +77,19 @@ namespace Models.CLEM.Activities
             return resourcesNeeded;
         }
 
+        /// <inheritdoc/>
+        public override void PerformTasksForTimestep(double argument = 0)
+        {
+            if(ResourceRequestList.Any())
+            {
+                var finRequest = ResourceRequestList.Where(a => a.ResourceType == typeof(Finance)).FirstOrDefault<ResourceRequest>();
+                if (finRequest != null)
+                {
+                    SetStatusSuccessOrPartial(finRequest.Provided != finRequest.Required);
+                }
+            }
+        }
+
         #region descriptive summary
 
         /// <inheritdoc/>
@@ -87,9 +97,8 @@ namespace Models.CLEM.Activities
         {
             using (StringWriter htmlWriter = new StringWriter())
             {
-                htmlWriter.Write("\r\n<div class=\"activityentry\">Pay ");
-                htmlWriter.Write("<span class=\"setvalue\">" + Amount.ToString("#,##0.00") + "</span> from ");
-                htmlWriter.Write(CLEMModel.DisplaySummaryValueSnippet(AccountName, "Not set", HTMLSummaryStyle.Resource));
+                htmlWriter.Write($"\r\n<div class=\"activityentry\">Pay {CLEMModel.DisplaySummaryValueSnippet(Amount, warnZero:true)}");
+                htmlWriter.Write($" from {CLEMModel.DisplaySummaryValueSnippet(AccountName, "Not set", HTMLSummaryStyle.Resource)}");
                 htmlWriter.Write("</div>");
                 return htmlWriter.ToString(); 
             }

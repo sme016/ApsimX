@@ -1,25 +1,29 @@
-﻿namespace Models.Core
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Reflection;
+using APSIM.Shared.Utilities;
+using Models.Factorial;
+using Newtonsoft.Json;
+
+namespace Models.Core
 {
-    using APSIM.Shared.Utilities;
-    using Models.Factorial;
-    using System;
-    using APSIM.Shared.Documentation;
-    using System.Collections.Generic;
-    using Newtonsoft.Json;
-    using System.Linq;
 
     /// <summary>
     /// Base class for all models
     /// </summary>
     [Serializable]
     [ValidParent(typeof(Folder))]
-    [ValidParent(typeof(Replacements))]
     [ValidParent(typeof(Factor))]
     [ValidParent(typeof(CompositeFactor))]
     public abstract class Model : IModel
     {
         [NonSerialized]
         private IModel modelParent;
+
+        private bool _enabled = true;
+        private bool _isCreated = false;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="Model" /> class.
@@ -36,6 +40,9 @@
         /// Gets or sets the name of the model
         /// </summary>
         public string Name { get; set; }
+
+        /// <summary>The name of the resource.</summary>
+        public string ResourceName { get; set; }
 
         /// <summary>
         /// Gets or sets a list of child models.   
@@ -67,7 +74,21 @@
         /// <summary>
         /// Gets or sets whether the model is enabled
         /// </summary>
-        public bool Enabled { get; set; }
+        public bool Enabled
+        {
+            get
+            {
+                return _enabled;
+            }
+            set
+            {
+                _enabled = value;
+                // enable / disable our children if serialisation has completed.
+                if (_isCreated)
+                    foreach (var child in Children)
+                        child.Enabled = _enabled;
+            }
+        }
 
         /// <summary>
         /// Controls whether the model can be modified.
@@ -438,7 +459,19 @@
         /// Called when the model has been newly created in memory whether from 
         /// cloning or deserialisation.
         /// </summary>
-        public virtual void OnCreated() { }
+        public virtual void OnCreated()
+        {
+            _isCreated = true;
+            // Check for duplicate child models (child models with the same name).
+            // First, group children according to their name.
+            IEnumerable<IGrouping<string, IModel>> groups = Children.GroupBy(c => c.Name);
+            foreach (IGrouping<string, IModel> group in groups)
+            {
+                int n = group.Count();
+                if (n > 1)
+                    throw new Exception($"Duplicate models found: {FullPath} has {n} children named {group.Key}");
+            }
+        }
 
         /// <summary>
         /// Called immediately before a simulation has its links resolved and is run.
@@ -461,15 +494,20 @@
             if (!typeof(IModel).IsAssignableFrom(type))
                 return false;
 
-            // Functions are currently allowable anywhere
-            // Note - IFunction does have a [ValidParent(DropAnywhere = true)]
-            // attribute, but the GetAttributes method doesn't look in interfaces.
-            if (type.GetInterface("IFunction") != null)
-                return true;
+            List<Type> modelParentTypes = new();
+            foreach(ValidParentAttribute validParent in ReflectionUtilities.GetAttributes(typeof(Model), typeof(ValidParentAttribute), true))
+                modelParentTypes.Add(validParent.ParentType);
+
+            bool hasValidParents = false;
 
             // Is allowable if one of the valid parents of this type (t) matches the parent type.
             foreach (ValidParentAttribute validParent in ReflectionUtilities.GetAttributes(type, typeof(ValidParentAttribute), true))
             {
+                // Used to make objects that have no explicit ValidParent attributes allowed
+                // to be placed anywhere.
+                if (!modelParentTypes.Contains(validParent.ParentType))
+                    hasValidParents = true;
+
                 if (validParent != null)
                 {
                     if (validParent.DropAnywhere)
@@ -479,7 +517,12 @@
                         return true;
                 }
             }
-            return false;
+            
+            // If it doesn't have any valid parents, it should be able to be placed anywhere.
+            if(hasValidParents)
+                return false;
+            else 
+                return true;
         }
 
         /// <summary>
@@ -488,13 +531,59 @@
         /// Returns null if not found.
         /// </summary>
         /// <param name="path">The path of the variable/model.</param>
-        /// <param name="ignoreCase">Perform a case-insensitive search?</param>
+        /// <param name="flags">LocatorFlags controlling the search</param>
         /// <remarks>
-        /// See <see cref="Locater"/> for more info about paths.
+        /// See <see cref="Locator"/> for more info about paths.
         /// </remarks>
-        public IVariable FindByPath(string path, bool ignoreCase = false)
+        public IVariable FindByPath(string path, LocatorFlags flags = LocatorFlags.CaseSensitive | LocatorFlags.IncludeDisabled)
         {
-            return Locator().GetInternal(path, this, ignoreCase);
+            return Locator.GetObject(path, flags);
+        }
+
+        /// <summary>
+        /// Find and return multiple matches (e.g. a soil in multiple zones) for a given path.
+        /// Note that this can be a variable/property or a model.
+        /// Returns null if not found.
+        /// </summary>
+        /// <param name="path">The path of the variable/model.</param>
+        public IEnumerable<IVariable> FindAllByPath(string path)
+        {
+            IEnumerable<IModel> matches = null;
+
+            // Remove a square bracketed model name and change our relativeTo model to 
+            // the referenced model.
+            if (path.StartsWith("["))
+            {
+                int posCloseBracket = path.IndexOf(']');
+                if (posCloseBracket != -1)
+                {
+                    string modelName = path.Substring(1, posCloseBracket - 1);
+                    path = path.Remove(0, posCloseBracket + 1).TrimStart('.');
+                    matches = FindAllInScope(modelName);
+                    if (!matches.Any())
+                    {
+                        // Didn't find a model with a name matching the square bracketed string so
+                        // now try and look for a model with a type matching the square bracketed string.
+                        Type[] modelTypes = ReflectionUtilities.GetTypeWithoutNameSpace(modelName, Assembly.GetExecutingAssembly());
+                        if (modelTypes.Length == 1)
+                            matches = FindAllInScope().Where(m => modelTypes[0].IsAssignableFrom(m.GetType()));
+                    }
+                }
+            }
+            else
+                matches = new IModel[] { this };
+
+            foreach (Model match in matches)
+            {
+                if (string.IsNullOrEmpty(path))
+                    yield return new VariableObject(match);
+                else
+                {
+                    var variable = match.Locator.GetObject(path, LocatorFlags.PropertiesOnly | LocatorFlags.CaseSensitive | LocatorFlags.IncludeDisabled);
+                    if (variable != null)
+                        yield return variable;
+                }
+            }
         }
 
         /// <summary>
@@ -509,57 +598,23 @@
             }
         }
 
-        /// <summary>
-        /// Gets the locater model.
-        /// </summary>
-        /// <remarks>
-        /// This is overriden in class Simulation.
-        /// </remarks>
-        protected virtual Locater Locator()
+        /// <summary>A Locator object for finding models and variables.</summary>
+        [NonSerialized]
+        private Locator locator;
+
+        /// <summary>Cache to speed up scope lookups.</summary>
+        /// <value>The locater.</value>
+        [JsonIgnore]
+        public Locator Locator
         {
-            Simulation sim = FindAncestor<Simulation>();
-            if (sim != null)
-                return sim.Locater;
-
-            // Simulation can be null if this model is not under a simulation e.g. DataStore.
-            return new Locater();
-        }
-
-        /// <summary>
-        /// Document the model, and any child models which should be documented.
-        /// </summary>
-        /// <remarks>
-        /// It is a mistake to call this method without first resolving links.
-        /// </remarks>
-        public virtual IEnumerable<ITag> Document()
-        {   
-            yield return new Section(Name, GetModelDescription());
-        }
-
-        /// <summary>
-        /// Get a description of the model from the summary and remarks
-        /// xml documentation comments in the source code.
-        /// </summary>
-        /// <remarks>
-        /// Note that the returned tags are not inside a section.
-        /// </remarks>
-        protected IEnumerable<ITag> GetModelDescription()
-        {
-            yield return new Paragraph(CodeDocumentation.GetSummary(GetType()));
-            yield return new Paragraph(CodeDocumentation.GetRemarks(GetType()));
-        }
-
-        /// <summary>
-        /// Document all child models of a given type.
-        /// </summary>
-        /// <param name="withHeadings">If true, each child to be documented will be given its own section/heading.</param>
-        /// <typeparam name="T">The type of models to be documented.</typeparam>
-        protected IEnumerable<ITag> DocumentChildren<T>(bool withHeadings = false) where T : IModel
-        {
-            if (withHeadings)
-                return FindAllChildren<T>().Select(m => new Section(m.Name, m.Document()));
-            else
-                return FindAllChildren<T>().SelectMany(m => m.Document());
+            get
+            {
+                if (locator == null)
+                {
+                    locator = new Locator(this);
+                }
+                return locator;
+            }
         }
     }
 }

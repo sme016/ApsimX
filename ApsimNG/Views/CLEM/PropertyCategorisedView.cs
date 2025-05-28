@@ -10,6 +10,7 @@ namespace UserInterface.Views
     using System.Runtime.InteropServices;
     using APSIM.Shared.Utilities;
     using global::UserInterface.Extensions;
+    using Utility;
 
     /// <summary>
     /// GTK# based view of the PropertyCategorisedPresenter to display a tree view of categories and sub-categories to assit filtering properties
@@ -38,7 +39,7 @@ namespace UserInterface.Views
         public PropertyCategorisedView(ViewBase owner) : base(owner)
         {
             Builder builder = ViewBase.BuilderFromResource("ApsimNG.Resources.Glade.PropertyCategoryView.glade");
-            Gtk.HPaned hpaned = (Gtk.HPaned)builder.GetObject("hpaned1"); 
+            Gtk.Paned hpaned = (Gtk.Paned)builder.GetObject("hpaned1"); 
             treeview1 = (Gtk.TreeView)builder.GetObject("treeview1");
             rightHandView = (Viewport)builder.GetObject("RightHandView");
             mainWidget = hpaned;
@@ -77,6 +78,8 @@ namespace UserInterface.Views
                     child.Dispose();
                 }
             }
+            popup.Clear();
+            popup.Dispose();
             treeview1.CursorChanged -= OnAfterSelect;
             treeview1.ButtonReleaseEvent -= OnButtonUp;
             treeview1.ButtonPressEvent -= OnButtonPress;

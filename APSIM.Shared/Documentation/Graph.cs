@@ -41,16 +41,23 @@ namespace APSIM.Shared.Documentation
         public string Title { get; private set; }
 
         /// <summary>
+        /// Graph Path
+        /// </summary>
+        public string Path { get; private set; }
+
+        /// <summary>
         /// Constructs a graph tag instance.
         /// </summary>
         /// <param name="title">Title of the graph.</param>
+        /// <param name="path">Path of graph.</param>
         /// <param name="series">The series to be shown on the graph.</param>
         /// <param name="xAxis">The x axis.</param>
         /// <param name="yAxis">The y axis.</param>
         /// <param name="legend">Legend configuration.</param>
-        public Graph(string title, IEnumerable<Series> series, Axis xAxis, Axis yAxis, LegendConfiguration legend)
+        public Graph(string title, string path, IEnumerable<Series> series, Axis xAxis, Axis yAxis, LegendConfiguration legend)
         {
             Title = title;
+            Path = path;
             Series = series;
             Legend = legend;
             XAxis = xAxis;
@@ -77,6 +84,16 @@ namespace APSIM.Shared.Documentation
                 default:
                     throw new NotImplementedException($"Unknown axis position {position}");
             }
+        }
+
+        /// <summary>Adds an ITag as a child of this ITag</summary>
+        public void Add(ITag tag) {
+            throw new Exception("Graph cannot have child tags");
+        }
+
+        /// <summary>Adds a list of ITags as a children of this ITag</summary>
+        public void Add(List<ITag> tags) {
+            throw new Exception("Graph cannot have child tags");
         }
     }
 }

@@ -1,70 +1,33 @@
-﻿namespace UserInterface.Views
+﻿using System;
+using System.Linq;
+using Gtk;
+using UserInterface.Classes;
+using UserInterface.Extensions;
+
+namespace UserInterface.Views
 {
-    using System;
-    using System.Linq;
-    using Classes;
-    using global::UserInterface.Extensions;
-    using Gtk;
-
-    /// <summary>An interface for a list with a button bar</summary>
-    public interface IListButtonView
-    {
-        /// <summary>The list.</summary>
-        IListBoxView List { get; }
-
-        /// <summary>
-        /// Filter to be applied to displayed items.
-        /// </summary>
-        string Filter { get; }
-
-        /// <summary>Add a button to the button bar</summary>
-        /// <param name="text">Text for button</param>
-        /// <param name="image">Image for button</param>
-        /// <param name="handler">Handler to call when user clicks on button</param>
-        void AddButton(string text, Image image, EventHandler handler);
-        
-        /// <summary>
-        /// Adds a button with a submenu.
-        /// </summary>
-        /// <param name="text">Text for button.</param>
-        /// <param name="image">Image for button.</param>
-        void AddButtonWithMenu(string text, Image image);
-
-        /// <summary>
-        /// Adds a button to a sub-menu.
-        /// </summary>
-        /// <param name="menuId">Text on the menu button.</param>
-        /// <param name="text">Text on the button.</param>
-        /// <param name="image">Image on the button.</param>
-        /// <param name="handler">Handler to call when button is clicked.</param>
-        void AddButtonToMenu(string menuId, string text, Image image, EventHandler handler);
-
-        /// <summary>
-        /// Invoked when the filter is changed.
-        /// </summary>
-        event EventHandler FilterChanged;
-    }
 
     /// <summary>A view for a list with a button bar</summary>
     public class ListButtonView : ViewBase, IListButtonView
     {
         private bool buttonsAreToolbar;
-        private VBox vbox;
+        private Box vbox;
         private ListBoxView listboxView;
         private ScrolledWindow scrolledwindow1;
-        private HBox buttonPanel;
-        private HBox filterPanel;
+        private Box buttonPanel;
+        private Box filterPanel;
         private Entry filterEntry;
         private Toolbar btnToolbar = null;
 
         /// <summary>Constructor</summary>
         public ListButtonView(ViewBase owner) : base(owner)
         {
-            vbox = new VBox(false, 0);
+            vbox = new Box(Orientation.Vertical, 0);
+            vbox.Homogeneous = false;
             mainWidget = vbox;
-            buttonPanel = new HBox();
+            buttonPanel = new Box(Orientation.Horizontal, 0);
             // buttonPanel.Layout = ButtonBoxStyle.Start;
-            filterPanel = new HBox();
+            filterPanel = new Box(Orientation.Horizontal, 0);
             Label filterLabel = new Label("Search: ");
             filterEntry = new Entry();
             filterPanel.PackStart(filterLabel, false, false, 0);
@@ -309,5 +272,44 @@
                 ShowError(err);
             }
         }
+    }
+
+    /// <summary>An interface for a list with a button bar</summary>
+    public interface IListButtonView
+    {
+        /// <summary>The list.</summary>
+        IListBoxView List { get; }
+
+        /// <summary>
+        /// Filter to be applied to displayed items.
+        /// </summary>
+        string Filter { get; }
+
+        /// <summary>Add a button to the button bar</summary>
+        /// <param name="text">Text for button</param>
+        /// <param name="image">Image for button</param>
+        /// <param name="handler">Handler to call when user clicks on button</param>
+        void AddButton(string text, Image image, EventHandler handler);
+
+        /// <summary>
+        /// Adds a button with a submenu.
+        /// </summary>
+        /// <param name="text">Text for button.</param>
+        /// <param name="image">Image for button.</param>
+        void AddButtonWithMenu(string text, Image image);
+
+        /// <summary>
+        /// Adds a button to a sub-menu.
+        /// </summary>
+        /// <param name="menuId">Text on the menu button.</param>
+        /// <param name="text">Text on the button.</param>
+        /// <param name="image">Image on the button.</param>
+        /// <param name="handler">Handler to call when button is clicked.</param>
+        void AddButtonToMenu(string menuId, string text, Image image, EventHandler handler);
+
+        /// <summary>
+        /// Invoked when the filter is changed.
+        /// </summary>
+        event EventHandler FilterChanged;
     }
 }

@@ -1,31 +1,31 @@
-﻿namespace Models.PMF.Organs
+﻿using System;
+using System.Collections.Generic;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Functions;
+using Models.Functions.DemandFunctions;
+using Models.Interfaces;
+using Models.PMF.Interfaces;
+using Models.PMF.Library;
+using Models.PMF.Phen;
+using Newtonsoft.Json;
+
+namespace Models.PMF.Organs
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Interfaces;
-    using Models.Functions;
-    using Models.PMF.Interfaces;
-    using Models.PMF.Library;
-    using System;
-    using System.Collections.Generic;
-    using Models.PMF.Phen;
-    using Newtonsoft.Json;
-    using APSIM.Shared.Documentation;
 
     /// <summary>
     /// This organ is simulated using a SimpleLeaf organ type.  It provides the core functions of intercepting radiation, producing biomass
     ///  through photosynthesis, and determining the plant's transpiration demand.  The model also calculates the growth, senescence, and
     ///  detachment of leaves.  SimpleLeaf does not distinguish leaf cohorts by age or position in the canopy.
-    /// 
+    ///
     /// Radiation interception and transpiration demand are computed by the MicroClimate model.  This model takes into account
     ///  competition between different plants when more than one is present in the simulation.  The values of canopy Cover, LAI, and plant
     ///  Height (as defined below) are passed daily by SimpleLeaf to the MicroClimate model.  MicroClimate uses an implementation of the
-    ///  Beer-Lambert equation to compute light interception and the Penman-Monteith equation to calculate potential evapotranspiration.  
+    ///  Beer-Lambert equation to compute light interception and the Penman-Monteith equation to calculate potential evapotranspiration.
     ///  These values are then given back to SimpleLeaf which uses them to calculate photosynthesis and soil water demand.
     /// </summary>
     /// <remarks>
-    /// NOTE: the summary above is used in the Apsim's autodoc.
-    /// 
     /// SimpleLeaf has two options to define the canopy: the user can either supply a function describing LAI or a function describing canopy cover directly.  From either of these functions SimpleLeaf can obtain the other property using the Beer-Lambert equation with the specified value of extinction coefficient.
     /// The effect of growth rate on transpiration is captured by the Fractional Growth Rate (FRGR) function, which is passed to the MicroClimate model.
     /// </remarks>
@@ -33,7 +33,7 @@
     [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(Plant))]
-    public class SimpleLeaf : Model, ICanopy, IHasWaterDemand,  IOrgan, IArbitration, IOrganDamage
+    public class SimpleLeaf : Model, ICanopy, IHasWaterDemand, IOrgan, IArbitration, IOrganDamage, IHasDamageableBiomass
     {
         /// <summary>
         /// The met data
@@ -45,7 +45,11 @@
         /// The plant
         /// </summary>
         [Link]
-        private Plant plant = null;
+        private Plant parentPlant = null;
+
+        /// <summary>Link to summary instance.</summary>
+        [Link]
+        private ISummary summary = null;
 
         /// <summary>
         /// The surface organic matter model.
@@ -75,7 +79,7 @@
         /// The height function.
         /// </summary>
         [Link(Type = LinkType.Child, ByName = true)]
-        private IFunction tallness = null;
+        private IFunction heightFunction = null;
 
         /// <summary>
         /// The lai dead function.
@@ -178,14 +182,14 @@
         /// </summary>
         [Link(Type = LinkType.Child, ByName = true)]
         [Units("g/m2/d")]
-        private BiomassDemandAndPriority dmDemands = null;
+        private NutrientDemandFunctions dmDemands = null;
 
         /// <summary>
         /// The N demand function.
         /// </summary>
         [Link(Type = LinkType.Child, ByName = true)]
         [Units("g/m2/d")]
-        private BiomassDemandAndPriority nDemands = null;
+        private NutrientDemandFunctions nDemands = null;
 
         /// <summary>
         /// The initial biomass dry matter weight.
@@ -247,9 +251,19 @@
         private Biomass startLive = null;
 
         /// <summary>
-        /// Is leaf initialised?
+        /// Flag whether leaf is initialised
         /// </summary>
         private bool leafInitialised = false;
+
+        /// <summary>
+        /// Live leaf area removed by biomass removal
+        /// </summary>
+        public double LAIRemoved { get; private set; }
+
+        /// <summary>
+        /// Dead leaf area removed by biomass removal
+        /// </summary>
+        public double LAIDeadRemoved { get; private set; }
 
         /// <summary>
         /// Constructor.
@@ -451,7 +465,7 @@
         /// Gets the maximum N concentration.
         /// </summary>
         [JsonIgnore]
-        public double MaxNconc
+        public double MaxNConc
         {
             get
             {
@@ -463,7 +477,7 @@
         /// Gets the minimum N concentration.
         /// </summary>
         [JsonIgnore]
-        public double MinNconc
+        public double MinNConc
         {
             get
             {
@@ -475,7 +489,7 @@
         /// Gets the minimum N concentration.
         /// </summary>
         [JsonIgnore]
-        public double CritNconc
+        public double CritNConc
         {
             get
             {
@@ -514,7 +528,7 @@
         /// </summary>
         [JsonIgnore]
         [Units("g/g")]
-        public double Nconc
+        public double NConc
         {
             get
             {
@@ -555,7 +569,7 @@
         {
             get
             {
-                return plant.PlantType;
+                return parentPlant.PlantType;
             }
         }
 
@@ -595,14 +609,29 @@
         }
 
         /// <summary>
-        /// Gets the cover green.
+        /// Gets the cover green removed today.
         /// </summary>
         [Units("0-1")]
+        public double CoverGreenRemoved
+        {
+            get
+            {
+                double coverPreRemoval = 1.0 - Math.Exp(-extinctionCoefficient.Value() * LAI);
+                double coverPostRemoval = 1.0 - Math.Exp(-extinctionCoefficient.Value() * (LAI - LAIRemoved));
+                return coverPreRemoval - coverPostRemoval;
+            }
+        }
+
+
+            /// <summary>
+            /// Gets the cover green.
+            /// </summary>
+            [Units("0-1")]
         public double CoverGreen
         {
             get
             {
-                if (plant.IsAlive)
+                if (parentPlant.IsAlive)
                 {
                     double greenCover = 0.0;
                     if (cover == null)
@@ -624,9 +653,10 @@
         {
             get
             {
+                double factor = 0.0;
                 if (Live != null)
-                    return MathUtilities.Divide(Live.N, Live.Wt * MaxNconc, 1);
-                return 0;
+                    factor = MathUtilities.Divide(Live.N, Live.Wt * MaxNConc, 1);
+                return Math.Min(1.0,factor);
             }
         }
 
@@ -639,8 +669,21 @@
             {
                 double factor = 0.0;
                 if (Live != null)
-                    factor = MathUtilities.Divide(Live.N - Live.StructuralN, Live.Wt * (CritNconc - MinNconc), 1.0);
+                    factor = MathUtilities.Divide(Live.N - Live.StructuralN, Live.Wt * (CritNConc - MinNConc), 1.0);
                 return Math.Min(1.0, factor);
+            }
+        }
+
+        /// <summary>
+        /// Gets the cover dead removed today.
+        /// </summary>
+        public double CoverDeadRemoved
+        {
+            get
+            {
+                double coverPreRemoval = 1.0 - Math.Exp(-extinctionCoefficient.Value() * LAIDead);
+                double coverPostRemoval = 1.0 - Math.Exp(-extinctionCoefficient.Value() * (LAIDead - LAIDeadRemoved));
+                return coverPreRemoval - coverPostRemoval;
             }
         }
 
@@ -691,8 +734,6 @@
             }
         }
 
-
-
         /// <summary>
         /// Daily maximum stomatal conductance.
         /// </summary>
@@ -710,6 +751,16 @@
         /// </summary>
         [JsonIgnore]
         public double WaterAllocation { get; set; }
+
+        /// <summary>A list of material (biomass) that can be damaged.</summary>
+        public IEnumerable<DamageableBiomass> Material
+        {
+            get
+            {
+                yield return new DamageableBiomass($"{Parent.Name}.{Name}", Live, true);
+                yield return new DamageableBiomass($"{Parent.Name}.{Name}", Dead, false);
+            }
+        }
 
         /// <summary>
         /// Clears this instance.
@@ -740,6 +791,8 @@
         /// </summary>
         private void ClearBiomassFlows()
         {
+            LAIRemoved = 0.0;
+            LAIDeadRemoved = 0.0;
             Allocated.Clear();
             Senesced.Clear();
             Detached.Clear();
@@ -752,8 +805,8 @@
         [EventSubscribe("SetDMSupply")]
         private void SetDMSupply(object sender, EventArgs e)
         {
-            DMSupply.Reallocation = AvailableDMReallocation();
-            DMSupply.Retranslocation = AvailableDMRetranslocation();
+            DMSupply.ReAllocation = AvailableDMReallocation();
+            DMSupply.ReTranslocation = AvailableDMRetranslocation();
             DMSupply.Uptake = 0;
             DMSupply.Fixation = photosynthesis.Value();
         }
@@ -766,6 +819,8 @@
         {
             if (phaseChange.StageName == LeafInitialisationStage)
                 leafInitialised = true;
+            summary.WriteMessage(this, phaseChange.StageName, MessageType.Diagnostic);
+            summary.WriteMessage(this, $"LAI = {LAI:f2} (m^2/m^2)", MessageType.Diagnostic);
         }
 
         /// <summary>
@@ -777,7 +832,7 @@
         private void OnDoPotentialPlantGrowth(object sender, EventArgs e)
         {
             // save current state
-            if (plant.IsEmerged)
+            if (parentPlant.IsEmerged)
                 startLive = ReflectionUtilities.Clone(Live) as Biomass;
             if (leafInitialised)
             {
@@ -789,7 +844,7 @@
                 if (area != null)
                     LAI = area.Value();
 
-                Height = tallness.Value();
+                Height = heightFunction.Value();
                 if (baseHeight == null)
                     BaseHeight = 0;
                 else
@@ -808,12 +863,12 @@
         [EventSubscribe("SetNSupply")]
         protected virtual void SetNSupply(object sender, EventArgs e)
         {
-            NSupply.Reallocation = Math.Max(0, (startLive.StorageN + startLive.MetabolicN) * senescenceRate.Value() * nReallocationFactor.Value());
-            if (MathUtilities.IsNegative(NSupply.Reallocation))
+            NSupply.ReAllocation = Math.Max(0, (startLive.StorageN + startLive.MetabolicN) * senescenceRate.Value() * nReallocationFactor.Value());
+            if (MathUtilities.IsNegative(NSupply.ReAllocation))
                 throw new Exception("Negative N reallocation value computed for " + Name);
 
-            NSupply.Retranslocation = Math.Max(0, (startLive.StorageN + startLive.MetabolicN) * (1 - senescenceRate.Value()) * nRetranslocationFactor.Value());
-            if (MathUtilities.IsNegative(NSupply.Retranslocation))
+            NSupply.ReTranslocation = Math.Max(0, (startLive.StorageN + startLive.MetabolicN) * (1 - senescenceRate.Value()) * nRetranslocationFactor.Value());
+            if (MathUtilities.IsNegative(NSupply.ReTranslocation))
                 throw new Exception("Negative N retranslocation value computed for " + Name);
 
             NSupply.Fixation = 0;
@@ -828,7 +883,7 @@
         {
             if (MathUtilities.IsPositive(dmConversionEfficiency.Value()))
             {
-                DMDemand.Structural = (dmDemands.Structural.Value() / dmConversionEfficiency.Value() + remobilisationCost.Value());
+                DMDemand.Structural = MathUtilities.Divide(dmDemands.Structural.Value() , dmConversionEfficiency.Value(),0) + remobilisationCost.Value();
                 DMDemand.Storage = Math.Max(0, dmDemands.Storage.Value() / dmConversionEfficiency.Value());
                 DMDemand.Metabolic = 0;
                 DMDemand.QStructuralPriority = dmDemands.QStructuralPriority.Value();
@@ -890,8 +945,7 @@
         [EventSubscribe("DoDailyInitialisation")]
         protected void OnDoDailyInitialisation(object sender, EventArgs e)
         {
-            if (plant.IsAlive || plant.IsEnding)
-                ClearBiomassFlows();
+            ClearBiomassFlows();
         }
 
         /// <summary>
@@ -902,7 +956,7 @@
         [EventSubscribe("PlantSowing")]
         protected void OnPlantSowing(object sender, SowingParameters data)
         {
-            if (data.Plant == plant)
+            if (data.Plant == parentPlant)
             {
                 Clear();
                 ClearBiomassFlows();
@@ -921,7 +975,7 @@
         [EventSubscribe("DoActualPlantGrowth")]
         protected void OnDoActualPlantGrowth(object sender, EventArgs e)
         {
-            if (plant.IsAlive)
+            if (parentPlant.IsAlive)
             {
                 // Do senescence
                 double senescedFrac = senescenceRate.Value();
@@ -941,7 +995,7 @@
                 if (detaching.Wt > 0.0)
                 {
                     Detached.Add(detaching);
-                    surfaceOrganicMatter.Add(detaching.Wt * 10, detaching.N * 10, 0, plant.PlantType, Name);
+                    surfaceOrganicMatter.Add(detaching.Wt * 10, detaching.N * 10, 0, parentPlant.PlantType, Name);
                 }
 
                 // Do maintenance respiration
@@ -966,22 +1020,43 @@
             {
                 Detached.Add(Live);
                 Detached.Add(Dead);
-                surfaceOrganicMatter.Add(Wt * 10, N * 10, 0, plant.PlantType, Name);
+                surfaceOrganicMatter.Add(Wt * 10, N * 10, 0, parentPlant.PlantType, Name);
             }
 
             Clear();
         }
 
-        /// <summary>
-        /// Removes biomass from organs when harvest, graze or cut events are called.
-        /// </summary>
-        /// <param name="biomassRemoveType">Name of event that triggered this biomass remove call.</param>
-        /// <param name="amountToRemove">The fractions of biomass to remove</param>
-        public virtual void RemoveBiomass(string biomassRemoveType, OrganBiomassRemovalType amountToRemove)
+        /// <summary>Called when crop is harvested</summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+        [EventSubscribe("PostHarvesting")]
+        protected void OnPostHarvesting(object sender, HarvestingParameters e)
         {
-            biomassRemovalModel.RemoveBiomass(biomassRemoveType, amountToRemove, Live, Dead, Removed, Detached);
+            if (e.RemoveBiomass)
+                Harvest();
         }
-        
+
+        /// <summary>Remove biomass from organ.</summary>
+        /// <param name="liveToRemove">Fraction of live biomass to remove from simulation (0-1).</param>
+        /// <param name="deadToRemove">Fraction of dead biomass to remove from simulation (0-1).</param>
+        /// <param name="liveToResidue">Fraction of live biomass to remove and send to residue pool(0-1).</param>
+        /// <param name="deadToResidue">Fraction of dead biomass to remove and send to residue pool(0-1).</param>
+        /// <returns>The amount of biomass (live+dead) removed from the plant (g/m2).</returns>
+        public double RemoveBiomass(double liveToRemove, double deadToRemove, double liveToResidue, double deadToResidue)
+        {
+            LAIRemoved = LAI * (liveToRemove + liveToResidue);
+            LAIDeadRemoved = LAIDead * (deadToRemove + deadToResidue);
+            return biomassRemovalModel.RemoveBiomass(liveToRemove, deadToRemove, liveToResidue, deadToResidue, Live, Dead, Removed, Detached);
+        }
+
+        /// <summary>Harvest the organ.</summary>
+        /// <returns>The amount of biomass (live+dead) removed from the plant (g/m2).</returns>
+        public double Harvest()
+        {
+            return RemoveBiomass(biomassRemovalModel.HarvestFractionLiveToRemove, biomassRemovalModel.HarvestFractionDeadToRemove,
+                                 biomassRemovalModel.HarvestFractionLiveToResidue, biomassRemovalModel.HarvestFractionDeadToResidue);
+        }
+
         /// <summary>
         /// Calculates the water demand.
         /// </summary>
@@ -998,7 +1073,7 @@
         /// </summary>
         public double AvailableDMRetranslocation()
         {
-            double availableDM = Math.Max(0.0, startLive.StorageWt - DMSupply.Reallocation) * dmRetranslocationFactor.Value();
+            double availableDM = Math.Max(0.0, startLive.StorageWt - DMSupply.ReAllocation) * dmRetranslocationFactor.Value();
             if (MathUtilities.IsNegative(availableDM))
                 throw new Exception("Negative DM retranslocation value computed for " + Name);
 
@@ -1039,10 +1114,10 @@
                 throw new Exception("Retranslocation exceeds non structural biomass in organ: " + Name);
 
             // get DM lost by respiration (growth respiration)
-            // GrowthRespiration with unit CO2 
-            // GrowthRespiration is calculated as 
-            // Allocated CH2O from photosynthesis "1 / DMConversionEfficiency.Value()", converted 
-            // into carbon through (12 / 30), then minus the carbon in the biomass, finally converted into 
+            // GrowthRespiration with unit CO2
+            // GrowthRespiration is calculated as
+            // Allocated CH2O from photosynthesis "1 / DMConversionEfficiency.Value()", converted
+            // into carbon through (12 / 30), then minus the carbon in the biomass, finally converted into
             // CO2 (44/12).
             double growthRespFactor = ((1.0 / dmConversionEfficiency.Value()) * (12.0 / 30.0) - 1.0 * carbonConcentration.Value()) * 44.0 / 12.0;
             GrowthRespiration = 0.0;
@@ -1103,109 +1178,5 @@
             Allocated.StorageN -= nitrogen.Reallocation;
         }
 
-
-        /// <summary>Writes documentation for this function by adding to the list of documentation tags.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            foreach (var tag in GetModelDescription())
-                yield return tag;
-
-            // Document memos.
-            foreach (var memo in FindAllChildren<Memo>())
-                foreach (var tag in memo.Document())
-                    yield return tag;
-
-            // List the parameters, properties, and processes from this organ that need to be documented:
-
-            yield return new Section("Initial Dry Matter", initialWt.Document());
-
-            // document DM demands
-            var dmDemandTags = new List<ITag>();
-            dmDemandTags.Add(new Paragraph("The dry matter demand for the organ is calculated as defined in DMDemands, based on the DMDemandFunction and partition fractions for each biomass pool."));
-            dmDemandTags.AddRange(dmDemands.Document());
-            yield return new Section("Dry Matter Demand", dmDemandTags);
-
-            // document N demands
-            var nDemandTags = new List<ITag>();
-            nDemandTags.Add(new Paragraph("The N demand is calculated as defined in NDemands, based on DM demand the N concentration of each biomass pool."));
-            nDemandTags.AddRange(nDemands.Document());
-            yield return new Section("Nitrogen Demand", nDemandTags);
-
-            // document N demands
-            var nConcTags = new List<ITag>();
-            nConcTags.AddRange(minimumNConc.Document());
-            nConcTags.AddRange(criticalNConc.Document());
-            nConcTags.AddRange(maximumNConc.Document());
-            yield return new Section("Nitrogen Concentration Thresholds", nDemandTags);
-
-            // document DM supplies
-            var dmSupplyTags = new List<ITag>();
-            dmSupplyTags.AddRange(dmReallocationFactor.Document());
-            dmSupplyTags.AddRange(dmRetranslocationFactor.Document());
-            yield return new Section("Dry Matter Supply", dmSupplyTags);
-
-            // document photosynthesis
-            yield return new Section("Photosynthesis", photosynthesis.Document());
-
-            // document N supplies
-            var nSupplyTags = new List<ITag>();
-            nSupplyTags.AddRange(nReallocationFactor.Document());
-            nSupplyTags.AddRange(nRetranslocationFactor.Document());
-            yield return new Section("Nitrogen Supply", nSupplyTags);
-
-            // document canopy
-            var canopyTags = new List<ITag>();
-            if (area != null)
-            {
-                canopyTags.Add(new Paragraph(Name + " has been defined with a LAIFunction, cover is calculated using the Beer-Lambert equation."));
-                canopyTags.AddRange(area.Document());
-            }
-            if (cover != null)
-            {
-                canopyTags.Add(new Paragraph(Name + " has been defined with a CoverFunction. LAI is calculated using an inverted Beer-Lambert equation"));
-                canopyTags.AddRange(cover.Document());
-            }
-            canopyTags.AddRange(extinctionCoefficient.Document());
-            canopyTags.AddRange(tallness.Document());
-            yield return new Section("Canopy Properties", canopyTags);
-
-            var stomatalConductanceTags = new List<ITag>();
-            stomatalConductanceTags.Add(new Paragraph("Stomatal Conductance (gs) is calculated for use within the micromet model by adjusting a value provided for an atmospheric CO2 concentration of 350 ppm. The impact of other stresses  (e.g. Temperature, N) are captured through the modifier, Frgr."));
-            stomatalConductanceTags.Add(new Paragraph("  gs = Gsmax350 x FRGR x stomatalConductanceCO2Modifier"));
-            stomatalConductanceTags.AddRange(stomatalConductanceCO2Modifier.Document());
-            yield return new Section("StomatalConductance", stomatalConductanceTags);
-
-            // document senescence and detachment
-            var senescenceTags = new List<ITag>();
-            if (senescenceRate is Constant senescenceRateConstant)
-            {
-                if (senescenceRateConstant.Value() == 0)
-                    senescenceTags.Add(new Paragraph(Name + " has senescence parameterised to zero so all biomass in this organ will remain alive."));
-                else
-                    senescenceTags.Add(new Paragraph(Name + " senesces " + senescenceRateConstant.Value() * 100 + "% of its live biomass each day, moving the corresponding amount of biomass from the live to the dead biomass pool."));
-            }
-            else
-            {
-                senescenceTags.Add(new Paragraph("The proportion of live biomass that senesces and moves into the dead pool each day is quantified by the SenescenceRate."));
-                senescenceTags.AddRange(senescenceRate.Document());
-            }
-
-            if (detachmentRate is Constant detachmentRateConstant)
-            {
-                if (detachmentRateConstant.Value() == 0)
-                    senescenceTags.Add(new Paragraph(Name + " has detachment parameterised to zero so all biomass in this organ will remain with the plant until a defoliation or harvest event occurs."));
-                else
-                    senescenceTags.Add(new Paragraph(Name + " detaches " + detachmentRateConstant.Value() * 100 + "% of its dead biomass each day, passing it to the surface organic matter model for decomposition."));
-            }
-            else
-            {
-                senescenceTags.Add(new Paragraph("The proportion of Biomass that detaches and is passed to the surface organic matter model for decomposition is quantified by the DetachmentRateFunction."));
-                senescenceTags.AddRange(detachmentRate.Document()); 
-            }
-            yield return new Section("Senescence and Detachment", senescenceTags);
-
-            if (biomassRemovalModel != null)
-                yield return new Section("Biomass removal", biomassRemovalModel.Document());
-        }
     }
 }

@@ -1,12 +1,13 @@
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Text;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+
 namespace Models.Logging
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using System;
-    using System.Data;
-    using System.Text;
-    using System.Collections.Generic;
-    using System.Linq;
 
     /// <summary>
     /// A class encapsulating an initial conditions table.
@@ -21,12 +22,12 @@ namespace Models.Logging
         private string relativePath;
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
         public IEnumerable<InitialCondition> Conditions { get; private set; }
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
         /// <param name="provider"></param>
         /// <param name="conditions"></param>

@@ -1,11 +1,9 @@
 ﻿using System;
-using APSIM.Shared.Documentation;
-using System.Collections;
-using Models.Core;
-using Newtonsoft.Json;
 using System.Collections.Generic;
-using Models.PMF.Interfaces;
 using System.Linq;
+using Models.Core;
+using Models.PMF.Interfaces;
+using Models.PMF.Phen;
 
 namespace Models.PMF
 {
@@ -16,10 +14,13 @@ namespace Models.PMF
     [ValidParent(ParentType = typeof(Plant))]
     public class CompositeBiomass : Model, IBiomass
     {
-        private List<IOrganDamage> organs;
+        private List<IOrganDamage> organs = null;
 
-        /// <summary>List of organs to agregate.</summary>
-        [Description("List of organs to agregate.")]
+        [Link]
+        private ISummary summary = null;
+
+        /// <summary>List of organs to aggregate.</summary>
+        [Description("List of organs to aggregate.")]
         public string[] OrganNames { get; set; }
 
         /// <summary>Include live material?</summary>
@@ -42,11 +43,21 @@ namespace Models.PMF
                 throw new Exception("CompositeBiomass can only be dropped on a plant.");
             foreach (var organName in OrganNames)
             {
-                var organ = parentPlant.Organs.FirstOrDefault(o => o.Name == organName);
+                var organ = parentPlant.Children.FirstOrDefault(o => o.Name == organName);
                 if (organ == null && !(organ is IOrganDamage))
                     throw new Exception($"In {Name}, cannot find a plant organ called {organName}");
                 organs.Add(organ as IOrganDamage);
             }
+        }
+
+        /// <summary>Called when [phase changed].</summary>
+        /// <param name="phaseChange">The phase change.</param>
+        /// <param name="sender">Sender plant.</param>
+        [EventSubscribe("PhaseChanged")]
+        private void OnPhaseChanged(object sender, PhaseChangedType phaseChange)
+        {
+            if (Name == "AboveGround")
+                summary.WriteMessage(this, $"{Name} = {Wt:f2} (g/m^2)", MessageType.Diagnostic);
         }
 
         /// <summary>Gets the mass.</summary>
@@ -182,20 +193,6 @@ namespace Models.PMF
 
                 return n;
             }
-        }
-
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            foreach (ITag tag in base.Document())
-                yield return tag;
-
-            yield return new Paragraph($"{Name} summarises the following biomass objects:");
-
-            string st = string.Join(Environment.NewLine, OrganNames.Select(o => $"* {o}"));
-            yield return new Paragraph(st);
         }
     }
 }

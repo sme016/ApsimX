@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using APSIM.Shared.Documentation;
 using Models.Core;
 using Models.PMF.Organs;
 using Models.PMF.Struct;
@@ -33,7 +31,7 @@ namespace Models.Functions.DemandFunctions
         /// <summary>The leaf </summary>
         [Link]
         Leaf Leaf = null;
-        
+
         /// <summary>The structure</summary>
         [Link]
         Structure Structure = null;
@@ -46,14 +44,14 @@ namespace Models.Functions.DemandFunctions
             foreach (LeafCohort L in Leaf.Leaves)
             {
                 if (L.IsAppeared)
-                { 
+                {
                     double maxSinkStrength = Lmax * ((2 * te - tm) / (te * (te - tm))) *
                         Math.Pow((tm / te), (tm / (te - tm)));
-                    double result = maxSinkStrength * 
-                        ((te - L.Age) / (te - tm)) * 
+                    double result = maxSinkStrength *
+                        ((te - L.Age) / (te - tm)) *
                         Math.Pow((L.Age / tm), (tm / (te - tm)));
 
-                     
+
                     if (L.Age > te)
                     {
                         sinkStrength += 0;
@@ -62,20 +60,9 @@ namespace Models.Functions.DemandFunctions
                     {
                         sinkStrength += result;
                     }
-                } 
+                }
             }
             return Structure.TotalStemPopn * sinkStrength;
         }
-
-        /// <summary>Document the model.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // Write description of this class from summary and remarks XML documentation.
-            foreach (var tag in GetModelDescription())
-                yield return tag;
-
-            foreach (var tag in DocumentChildren<IModel>())
-                yield return tag;
-        }
     }
-}   
+}

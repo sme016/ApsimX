@@ -1,31 +1,32 @@
-﻿namespace Models
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Core.Run;
+using Models.Factorial;
+using Models.Interfaces;
+using Models.Sensitivity;
+using Models.Storage;
+using Models.Utilities;
+using Newtonsoft.Json;
+
+namespace Models
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Core.Run;
-    using Models.Factorial;
-    using Models.Interfaces;
-    using Models.Sensitivity;
-    using Models.Storage;
-    using Newtonsoft.Json;
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.Globalization;
-    using System.IO;
-    using System.Linq;
-    using System.Threading;
-    using Utilities;
 
     /// <summary>
     /// Encapsulates a SOBOL parameter sensitivity analysis.
     /// </summary>
     [Serializable]
     [ViewName("UserInterface.Views.PropertyAndGridView")]
-    [PresenterName("UserInterface.Presenters.PropertyAndTablePresenter")]
+    [PresenterName("UserInterface.Presenters.PropertyAndGridPresenter")]
     [ValidParent(ParentType = typeof(Simulations))]
     [ValidParent(ParentType = typeof(Folder))]
-    public class Sobol : Model, ISimulationDescriptionGenerator, IModelAsTable, IPostSimulationTool
+    public class Sobol : Model, ISimulationDescriptionGenerator, IPostSimulationTool
     {
         [Link]
         private IDataStore dataStore = null;
@@ -72,6 +73,7 @@
         /// <remarks>
         /// Needs to be public so that it gets written to .apsimx file
         /// </remarks>
+        [Display]
         public List<Parameter> Parameters { get; set; }
 
         /// <summary>
@@ -89,68 +91,6 @@
         {
             Parameters = new List<Parameter>();
             allCombinations = new List<List<CompositeFactor>>();
-        }
-
-        /// <summary>
-        /// Gets or sets the table of values.
-        /// </summary>
-        [JsonIgnore]
-        public List<DataTable> Tables
-        {
-            get
-            {
-                List<DataTable> tables = new List<DataTable>();
-
-                // Add a constant table.
-                DataTable constant = new DataTable();
-                constant.Columns.Add("Property", typeof(string));
-                constant.Columns.Add("Value", typeof(int));
-                DataRow constantRow = constant.NewRow();
-                constantRow["Property"] = "Number of paths:";
-                constantRow["Value"] = NumPaths;
-                constant.Rows.Add(constantRow);
-
-                //tables.Add(constant);
-
-                // Add a parameter table
-                DataTable table = new DataTable();
-                table.Columns.Add("Name", typeof(string));
-                table.Columns.Add("Path", typeof(string));
-                table.Columns.Add("LowerBound", typeof(double));
-                table.Columns.Add("UpperBound", typeof(double));
-
-                foreach (Parameter param in Parameters)
-                {
-                    DataRow row = table.NewRow();
-                    row["Name"] = param.Name;
-                    row["Path"] = param.Path;
-                    row["LowerBound"] = param.LowerBound;
-                    row["UpperBound"] = param.UpperBound;
-                    table.Rows.Add(row);
-                }
-                tables.Add(table);
-
-                return tables;
-            }
-            set
-            {
-                ParametersHaveChanged = true;
-                Parameters.Clear();
-                foreach (DataRow row in value[0].Rows)
-                {
-                    Parameter param = new Parameter();
-                    if (!Convert.IsDBNull(row["Name"]))
-                        param.Name = row["Name"].ToString();
-                    if (!Convert.IsDBNull(row["Path"]))
-                        param.Path = row["Path"].ToString();
-                    if (!Convert.IsDBNull(row["LowerBound"]))
-                        param.LowerBound = Convert.ToDouble(row["LowerBound"], CultureInfo.InvariantCulture);
-                    if (!Convert.IsDBNull(row["UpperBound"]))
-                        param.UpperBound = Convert.ToDouble(row["UpperBound"], CultureInfo.InvariantCulture);
-                    if (param.Name != null || param.Path != null)
-                        Parameters.Add(param);
-                }
-            }
         }
 
         /// <summary>Have the values of the parameters changed?</summary>
@@ -177,7 +117,7 @@
 
                 // Apply each composite factor of this combination to our simulation description.
                 combination.ForEach(c => c.ApplyToSimulation(simDescription));
-                
+
                 // Add simulation description to the return list of descriptions
                 simulationDescriptions.Add(simDescription);
 
@@ -349,7 +289,7 @@
 
                     // Write variables file
                     using (var writer = new StreamWriter(sobolVariableValuesFileName))
-                        DataTableUtilities.DataTableToText(variableValues.ToTable(), 0, ",", true, writer, excelFriendly: false, decimalFormatString:"F6");
+                        DataTableUtilities.DataTableToText(variableValues.ToTable(), 0, ",", true, writer, excelFriendly: false, decimalFormatString: "F6");
 
                     // Write X1
                     using (var writer = new StreamWriter(sobolx1FileName))
@@ -404,9 +344,13 @@
                         foreach (DataColumn col in resultsForValue.Columns)
                         {
                             if (col.DataType == typeof(string))
-                                results.SetValues(col.ColumnName, DataTableUtilities.GetColumnAsStrings(resultsForValue, col.ColumnName));
+                                results.SetValues(col.ColumnName, DataTableUtilities.GetColumnAsStrings(resultsForValue, col.ColumnName, CultureInfo.InvariantCulture));
                             else
-                                results.SetValues(col.ColumnName, DataTableUtilities.GetColumnAsDoubles(resultsForValue, col.ColumnName));
+                                // Someone needs to test this on a non-Australian locale.
+                                // Does R print out numbers using the system locale, or
+                                // an international one? If the system locale, change this
+                                // to CultureInfo.CurrentCulture.
+                                results.SetValues(col.ColumnName, DataTableUtilities.GetColumnAsDoubles(resultsForValue, col.ColumnName, CultureInfo.InvariantCulture));
                         }
                     }
                     catch (Exception err)
@@ -495,7 +439,7 @@
                 script += string.Format("X1[, {0}] <- {1}+runif(n)*{2}" + Environment.NewLine +
                                         "X2[, {0}] <- {1}+runif(n)*{2}" + Environment.NewLine
                                         ,
-                                        i+1, Parameters[i].LowerBound,
+                                        i + 1, Parameters[i].LowerBound,
                                         Parameters[i].UpperBound - Parameters[i].LowerBound);
             }
 
@@ -505,7 +449,7 @@
             script += string.Format("write.csv(X1, \"{0}\")" + Environment.NewLine +
                                     "write.csv(X2, \"{1}\")" + Environment.NewLine
                                     ,
-                                    sobolx1FileName.Replace("\\", "/"), 
+                                    sobolx1FileName.Replace("\\", "/"),
                                     sobolx2FileName.Replace("\\", "/"));
 
             //script += "sa <- sobolSalt(model = NULL, X1, X2, scheme=\"A\", nboot = 100)" + Environment.NewLine;

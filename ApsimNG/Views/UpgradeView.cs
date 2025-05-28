@@ -1,15 +1,16 @@
-﻿namespace UserInterface.Views
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using APSIM.Shared.Utilities;
+using Gtk;
+using UserInterface.Extensions;
+using UserInterface.Interfaces;
+
+namespace UserInterface.Views
 {
-    using System;
-    using System.Diagnostics;
-    using System.IO;
-    using System.Linq;
-    using System.Net;
-    using System.Reflection;
-    using APSIM.Shared.Utilities;
-    using global::UserInterface.Extensions;
-    using Gtk;
-    using Interfaces;
 
     /// <summary>
     /// An upgrade form.
@@ -19,11 +20,14 @@
         public class Upgrade
         {
             public DateTime ReleaseDate { get; set; }
-            public int IssueNumber { get; set; }
-            public string IssueTitle { get; set; }
-            public string IssueURL { get; set; }
-            public string ReleaseURL { get; set; }
-            public uint RevisionNumber { get; set; }
+            public uint Issue { get; set; }
+            public string Title { get; set; }
+            public string DownloadLinkDebian { get; set; }
+            public string DownloadLinkWindows { get; set; }
+            public string DownloadLinkMacOS { get; set; }
+            public string InfoUrl { get; set; }
+            public string Version { get; set; }
+            public uint Revision { get; set; }
         }
 
         /// <summary>
@@ -36,6 +40,12 @@
         /// </summary>
         private Upgrade[] allUpgrades = new Upgrade[0];
 
+        /// <summary>
+        /// Version number that indicates custom build (normally 0; set to -1 to test upgrade during development)
+        /// </summary>
+
+        private int customBuildVersion = 0;
+
         private bool loadFailure = false;
 
         /// <summary>
@@ -47,8 +57,9 @@
         private Window window1 = null;
         private Button button1 = null;
         private Button button2 = null;
-        private Table table1 = null;
-        private Table table2 = null;
+        private ScrolledWindow scrolledWindow1 = null;
+        private Grid grid1 = null;
+        private Grid grid2 = null;
         private Entry firstNameBox = null;
         private Entry lastNameBox = null;
         private Entry organisationBox = null;
@@ -58,7 +69,6 @@
         private Container licenseContainer = null;
         private CheckButton checkbutton1 = null;
         private Gtk.TreeView listview1 = null;
-        private Alignment alignment7 = null;
         private CheckButton oldVersions = null;
         private ListStore listmodel = new ListStore(typeof(string), typeof(string), typeof(string));
         private MarkdownView licenseView;
@@ -72,8 +82,8 @@
             window1 = (Window)builder.GetObject("window1");
             button1 = (Button)builder.GetObject("button1");
             button2 = (Button)builder.GetObject("button2");
-            table1 = (Table)builder.GetObject("table1");
-            table2 = (Table)builder.GetObject("table2");
+            grid1 = (Grid)builder.GetObject("grid1");
+            grid2 = (Grid)builder.GetObject("grid2");
             firstNameBox = (Entry)builder.GetObject("firstNameBox");
             lastNameBox = (Entry)builder.GetObject("lastNameBox");
             organisationBox = (Entry)builder.GetObject("organisationBox");
@@ -83,15 +93,15 @@
             licenseContainer = (Container)builder.GetObject("licenseContainer");
             checkbutton1 = (CheckButton)builder.GetObject("checkbutton1");
             listview1 = (Gtk.TreeView)builder.GetObject("listview1");
-            alignment7 = (Alignment)builder.GetObject("alignment7");
+            scrolledWindow1 = (ScrolledWindow)builder.GetObject("scrolledwindow1");
             oldVersions = (CheckButton)builder.GetObject("checkbutton2");
             listview1.Model = listmodel;
 
             Version version = Assembly.GetExecutingAssembly().GetName().Version;
-            if (version.Revision == 0)
+            if (version.Build == customBuildVersion)
             {
                 button1.Sensitive = false;
-                table2.Hide();
+                grid2.Hide();
                 checkbutton1.Hide();
             }
 
@@ -120,8 +130,8 @@
             countryBox.AddAttribute(cell, "text", 0);
 
             // Make the tab order a little more sensible than the defaults
-            table1.FocusChain = new Widget[] { alignment7, button1, button2 };
-            table2.FocusChain = new Widget[] { firstNameBox, lastNameBox, emailBox, organisationBox, countryBox };
+            grid1.FocusChain = new Widget[] { scrolledWindow1, button1, button2 };
+            grid2.FocusChain = new Widget[] { firstNameBox, lastNameBox, emailBox, organisationBox, countryBox };
 
             licenseView = new MarkdownView(owner);
             licenseContainer.Add(licenseView.MainWidget);
@@ -150,7 +160,7 @@
         {
             try
             {
-                window1.Window.Cursor = new Gdk.Cursor(Gdk.CursorType.Watch);
+                window1.Window.Cursor = new Gdk.Cursor(Gdk.Display.Default, Gdk.CursorType.Watch);
                 while (Gtk.Application.EventsPending())
                     Gtk.Application.RunIteration();
                 PopulateForm();
@@ -196,16 +206,14 @@
             organisationBox.Text = Utility.Configuration.Settings.Organisation;
             countryBox.Active = Constants.Countries.ToList().IndexOf(Utility.Configuration.Settings.Country);
 
-            WebClient web = new WebClient();
-
             string tempLicenseFileName = Path.Combine(Path.GetTempPath(), "APSIM_NonCommercial_RD_licence.htm");
             if (File.Exists(tempLicenseFileName))
                 File.Delete(tempLicenseFileName);
 
-            if (version.Revision == 0)
+            if (version.Build == customBuildVersion)
             {
                 button1.Sensitive = false;
-                table2.Hide();
+                grid2.Hide();
                 checkbutton1.Hide();
                 licenseView.Text = "You are currently using a custom build - **Upgrade is not available!**";
             }
@@ -218,19 +226,34 @@
         /// </summary>
         private void PopulateUpgradeList()
         {
-            Version version = Assembly.GetExecutingAssembly().GetName().Version;
-            // version = new Version(0, 0, 0, 652);  
             if (oldVersions.Active && allUpgrades.Length < 1)
-                allUpgrades = WebUtilities.CallRESTService<Upgrade[]>("https://apsimdev.apsim.info/APSIM.Builds.Service/Builds.svc/GetUpgradesSinceIssue?issueID=-1");
+                allUpgrades = GetUpgrades(-1).ToArray();
             else if (!oldVersions.Active && upgrades.Length < 1)
-                upgrades = WebUtilities.CallRESTService<Upgrade[]>("https://apsimdev.apsim.info/APSIM.Builds.Service/Builds.svc/GetUpgradesSinceIssue?issueID=" + version.Revision);
+            {
+                Version version = Assembly.GetExecutingAssembly().GetName().Version;
+                upgrades = GetUpgrades(version.Build).ToArray();
+            }
+
             foreach (Upgrade upgrade in oldVersions.Active ? allUpgrades : upgrades)
             {
-                string versionNumber = $"{upgrade.ReleaseDate:yyyy.MM}.{upgrade.RevisionNumber}";
-                listmodel.AppendValues(versionNumber, upgrade.IssueTitle, "");
+                string versionNumber = $"{upgrade.ReleaseDate:yyyy.MM}.{upgrade.Revision}";
+                listmodel.AppendValues(versionNumber, upgrade.Title, "");
             }
             if (listmodel.IterNChildren() > 0)
                 listview1.SetCursor(new TreePath("0"), null, false);
+        }
+
+        /// <summary>
+        /// Retrieve list of available upgrades from the upgrade server which
+        /// are more recent than the specified revision number.
+        /// </summary>
+        /// <param name="minRevision">
+        /// Retrieve all upgrades which are more recent than this revision
+        /// number. Set to -1 for all upgrades.
+        /// </param>
+        private IReadOnlyList<Upgrade> GetUpgrades(int minRevision)
+        {
+            return WebUtilities.PostRestService<List<Upgrade>>($"https://builds.apsim.info/api/nextgen/list?min={minRevision}");
         }
 
         private int GetSelIndex()
@@ -254,7 +277,7 @@
                 if (selIndex >= 0)
                 {
                     Upgrade[] upgradeList = oldVersions.Active ? allUpgrades : upgrades;
-                    Process.Start(upgradeList[selIndex].IssueURL);
+                    ProcessUtilities.ProcessStart(upgradeList[selIndex].InfoUrl);
                 }
             }
             catch (Exception err)
@@ -299,9 +322,9 @@
 
                     Upgrade[] upgradeList = oldVersions.Active ? allUpgrades : upgrades;
                     Upgrade upgrade = upgradeList[selIndex];
-                    versionNumber = upgrade.ReleaseDate.ToString("yyyy.MM.dd.") + upgrade.IssueNumber;
+                    versionNumber = upgrade.ReleaseDate.ToString("yyyy.MM.dd.") + upgrade.Issue;
 
-                    if ((Gtk.ResponseType)ViewBase.MasterView.ShowMsgDialog("Are you sure you want to upgrade to version " + versionNumber + "?",
+                    if ((Gtk.ResponseType)ViewBase.MasterView.ShowMsgDialog($"Are you sure you want to upgrade to version {upgrade.Version}?",
                                             "Are you sure?", MessageType.Question, ButtonsType.YesNo, window1) == Gtk.ResponseType.Yes)
                     {
                         // Write to the registration database.
@@ -315,28 +338,24 @@
                             throw new Exception("Encountered an error while updating registration information. Please try again later.", err);
                         }
 
-                        window1.Window.Cursor = new Gdk.Cursor(Gdk.CursorType.Watch);
-
-                        WebClient web = new WebClient();
+                        window1.Window.Cursor = new Gdk.Cursor(Gdk.Display.Default, Gdk.CursorType.Watch);
 
                         tempSetupFileName = Path.Combine(Path.GetTempPath(), "APSIMSetup.exe");
 
                         string sourceURL;
 
-                        upgrade.ReleaseURL = upgrade.ReleaseURL.Replace("ApsimSetup", "apsim-");
-
                         if (ProcessUtilities.CurrentOS.IsMac)
                         {
-                            sourceURL = Path.ChangeExtension(upgrade.ReleaseURL, "dmg");
+                            sourceURL = upgrade.DownloadLinkMacOS;
                             tempSetupFileName = Path.ChangeExtension(tempSetupFileName, "dmg");
                         }
                         else if (ProcessUtilities.CurrentOS.IsUnix)
                         {
-                            sourceURL = System.IO.Path.ChangeExtension(upgrade.ReleaseURL, "deb");
+                            sourceURL = upgrade.DownloadLinkDebian;
                             tempSetupFileName = System.IO.Path.ChangeExtension(tempSetupFileName, "deb");
                         }
                         else
-                            sourceURL = upgrade.ReleaseURL;
+                            sourceURL = upgrade.DownloadLinkWindows;
 
                         if (File.Exists(tempSetupFileName))
                             File.Delete(tempSetupFileName);
@@ -346,11 +365,15 @@
                             waitDlg = new Gtk.MessageDialog(window1, Gtk.DialogFlags.Modal,
                                 Gtk.MessageType.Info, Gtk.ButtonsType.Cancel, "Downloading file. Please wait...");
                             waitDlg.Title = "APSIM Upgrade";
-                            web.DownloadFileCompleted += Web_DownloadFileCompleted;
-                            web.DownloadProgressChanged += OnDownloadProgressChanged;
-                            web.DownloadFileAsync(new Uri(sourceURL), tempSetupFileName);
+                            var progress = new Progress<double>();
+                            progress.ProgressChanged += Download_ProgressChanged;
+
+                            var cancellationToken = new System.Threading.CancellationTokenSource();
+                            FileStream file = new FileStream(tempSetupFileName, FileMode.Create, System.IO.FileAccess.Write);
+                            _ = WebUtilities.GetAsyncWithProgress(sourceURL, file, progress, cancellationToken.Token, "*/*");
                             if (waitDlg.Run() == (int)ResponseType.Cancel)
-                                web.CancelAsync();
+                                cancellationToken.Cancel();
+
                         }
                         catch (Exception err)
                         {
@@ -360,14 +383,12 @@
                         {
                             if (waitDlg != null)
                             {
-                                web.DownloadProgressChanged -= OnDownloadProgressChanged;
                                 waitDlg.Dispose();
                                 waitDlg = null;
                             }
                             if (window1 != null && window1.Window != null)
                                 window1.Window.Cursor = null;
                         }
-
                     }
                 }
             }
@@ -378,24 +399,12 @@
         }
 
         /// <summary>
-        /// Throws if user has not provided info in a mandatory field.
-        /// </summary>
-        private void AssertInputsAreValid()
-        {
-            if (string.IsNullOrWhiteSpace(firstNameBox.Text) || 
-                string.IsNullOrWhiteSpace(lastNameBox.Text) ||
-                string.IsNullOrWhiteSpace(emailBox.Text) || 
-                string.IsNullOrWhiteSpace(countryBox.GetActiveText()))
-                throw new Exception("The mandatory details at the bottom of the screen (denoted with an asterisk) must be completed.");
-        }
-
-        /// <summary>
         /// Invoked when the download progress changes.
         /// Updates the progress bar.
         /// </summary>
         /// <param name="sender">Sender object.</param>
-        /// <param name="e">Event arguments.</param>
-        private void OnDownloadProgressChanged(object sender, DownloadProgressChangedEventArgs e)
+        /// <param name="e">Fraction (0-1) of download which has completed</param>
+        private void Download_ProgressChanged(object sender, double e)
         {
             try
             {
@@ -403,7 +412,7 @@
                 {
                     try
                     {
-                        double progress = 100.0 * e.BytesReceived / e.TotalBytesToReceive;
+                        double progress = 100.0 * e;
                         waitDlg.Text = string.Format("Downloading file: {0:0.}%. Please wait...", progress);
                     }
                     catch (Exception err)
@@ -417,9 +426,26 @@
                 err = new Exception("Error updating download progress", err);
                 ShowError(err);
             }
+            if (e == 1.0) // Should be true only iff the file has been completely downloaded
+            {
+                Web_DownloadFileCompleted();
+            }
+
         }
 
-        private void Web_DownloadFileCompleted(object sender, System.ComponentModel.AsyncCompletedEventArgs e)
+        /// <summary>
+        /// Throws if user has not provided info in a mandatory field.
+        /// </summary>
+        private void AssertInputsAreValid()
+        {
+            if (string.IsNullOrWhiteSpace(firstNameBox.Text) ||
+                string.IsNullOrWhiteSpace(lastNameBox.Text) ||
+                string.IsNullOrWhiteSpace(emailBox.Text) ||
+                string.IsNullOrWhiteSpace(countryBox.GetActiveText()))
+                throw new Exception("The mandatory details at the bottom of the screen (denoted with an asterisk) must be completed.");
+        }
+
+        private void Web_DownloadFileCompleted()
         {
             try
             {
@@ -431,56 +457,83 @@
                         waitDlg = null;
                     }
                 });
-                if (!e.Cancelled && !string.IsNullOrEmpty(tempSetupFileName) && versionNumber != null)
+                if (!string.IsNullOrEmpty(tempSetupFileName) && versionNumber != null)
                 {
-                    try
+                    int attemptCount = 0;
+                    while (attemptCount < 2)
                     {
-                        if (e.Error != null) // On Linux, we get to this point even when errors have occurred
-                            throw e.Error;
-
-                        if (File.Exists(tempSetupFileName))
+                        try
                         {
 
-                            if (ProcessUtilities.CurrentOS.IsWindows)
+
+                            if (File.Exists(tempSetupFileName))
                             {
-                                // The InnoSetup installer can be run with the /upgradefrom:xxx parameter
-                                // and will handle the removal of the previous version.
-                                string oldVersion = Models.Core.Simulations.ApsimVersion;
-                                Process.Start(tempSetupFileName, $"/upgradefrom={oldVersion}");
+
+                                if (ProcessUtilities.CurrentOS.IsWindows)
+                                {
+                                    // The InnoSetup installer can be run with the /upgradefrom:xxx parameter
+                                    // and will handle the removal of the previous version.
+                                    string oldVersion = Models.Core.Simulations.ApsimVersion;
+                                    var startInfo = new ProcessStartInfo()
+                                    {
+                                        FileName = tempSetupFileName,
+                                        Arguments = $"/upgradefrom={oldVersion}",
+                                        WorkingDirectory = Path.GetTempPath()
+                                    };
+                                    Process.Start(startInfo);
+                                }
+                                else if (ProcessUtilities.CurrentOS.IsMac)
+                                {
+                                    string script = Path.Combine(Path.GetTempPath(), $"apsim-upgrade-mac-{Guid.NewGuid()}.sh");
+                                    ReflectionUtilities.WriteResourceToFile(GetType().Assembly, "ApsimNG.Resources.Scripts.upgrade-mac.sh", script);
+                                    string apsimxDir = PathUtilities.GetAbsolutePath("%root%", null);
+                                    Process.Start("/bin/sh", $"{script} {tempSetupFileName} {apsimxDir}");
+                                }
+                                else
+                                {
+                                    // Assume (Debian) Linux and hope for the best.
+                                    string script = Path.Combine(Path.GetTempPath(), $"apsim-upgrade-debian-{Guid.NewGuid()}.sh");
+                                    ReflectionUtilities.WriteResourceToFile(GetType().Assembly, "ApsimNG.Resources.Scripts.upgrade-debian.sh", script);
+                                    Process.Start("/bin/sh", $"{script} {tempSetupFileName}");
+                                }
+
+                                attemptCount = 99;
+
+                                Application.Invoke((_, __) =>
+                                {
+                                    window1.Window.Cursor = null;
+
+                                    // Shutdown the user interface
+                                    window1.Dispose();
+                                    tabbedExplorerView.Close();
+                                });
                             }
-                            else if (ProcessUtilities.CurrentOS.IsMac)
+                        }
+                        catch (Exception err)
+                        {
+                            // Possible that the install file is being used by another process (eg. antivirus scanner)
+                            // Make one further attempt to start it after pausing for a short period, rather than failing
+
+                            attemptCount += 1;
+
+                            if (attemptCount < 2)
                             {
-                                string script = Path.Combine(Path.GetTempPath(), $"apsim-upgrade-mac-{Guid.NewGuid()}.sh");
-                                ReflectionUtilities.WriteResourceToFile(GetType().Assembly, "ApsimNG.Resources.Scripts.upgrade-mac.sh", script);
-                                string apsimxDir = PathUtilities.GetAbsolutePath("%root%", null);
-                                Process.Start("/bin/sh", $"{script} {tempSetupFileName} {apsimxDir}");
+
+                                System.Threading.Thread.Sleep(2000);
+
                             }
                             else
                             {
-                                // Assume (Debian) Linux and hope for the best.
-                                string script = Path.Combine(Path.GetTempPath(), $"apsim-upgrade-debian-{Guid.NewGuid()}.sh");
-                                ReflectionUtilities.WriteResourceToFile(GetType().Assembly, "ApsimNG.Resources.Scripts.upgrade-debian.sh", script);
-                                Process.Start("/bin/sh", $"{script} {tempSetupFileName}");
+                                Application.Invoke(delegate
+                                {
+                                    window1.Window.Cursor = null;
+                                    ViewBase.MasterView.ShowMsgDialog(err.Message, "Installation Error", MessageType.Error, ButtonsType.Ok, window1);
+                                });
                             }
 
-                            Application.Invoke((_, __) =>
-                            {
-                                window1.Window.Cursor = null;
-
-                                // Shutdown the user interface
-                                window1.Dispose();
-                                tabbedExplorerView.Close();
-                            });
                         }
                     }
-                    catch (Exception err)
-                    {
-                        Application.Invoke(delegate
-                        {
-                            window1.Window.Cursor = null;
-                            ViewBase.MasterView.ShowMsgDialog(err.Message, "Installation Error", MessageType.Error, ButtonsType.Ok, window1);
-                        });
-                    }
+
                 }
             }
             catch (Exception err)
@@ -494,35 +547,17 @@
         /// </summary>
         private void WriteUpgradeRegistration(string version)
         {
-            string url = "https://apsimdev.apsim.info/APSIM.Registration.Service/Registration.svc/AddRegistration";
-            url += "?firstName=" + firstNameBox.Text;
-
-            url = AddToURL(url, "lastName", lastNameBox.Text);
-            url = AddToURL(url, "organisation", organisationBox.Text);
-            url = AddToURL(url, "country", countryBox.GetActiveText());
-            url = AddToURL(url, "email", emailBox.Text);
-            url = AddToURL(url, "product", "APSIM Next Generation");
-            url = AddToURL(url, "version", version);
-            url = AddToURL(url, "platform", GetPlatform());
-            url = AddToURL(url, "type", "Upgrade");
+            string url = $"https://registration.apsim.info/api/upgrade?email={emailBox.Text}&version={version}&platform={GetPlatform()}";
 
             try
             {
-                WebUtilities.CallRESTService<object>(url);
+                WebUtilities.PostRestService<object>(url);
             }
             catch
             {
                 // Retry once.
                 WebUtilities.CallRESTService<object>(url);
             }
-        }
-
-        /// <summary>Add a key / value pair to url if not empty</summary>
-        private string AddToURL(string url, string key, string value)
-        {
-            if (value == null || value == string.Empty)
-                value = "-";
-            return url + "&" + key + "=" + value;
         }
 
         /// <summary>
@@ -536,7 +571,7 @@
                 return "Mac";
             else if (ProcessUtilities.CurrentOS.IsLinux)
                 return "Linux";
-            return "?";
+            throw new PlatformNotSupportedException($"No upgrade is available for this operating system.");
         }
 
         /// <summary>

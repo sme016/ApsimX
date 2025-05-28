@@ -1,10 +1,5 @@
 ﻿using System;
-using APSIM.Shared.Documentation;
-using System.Collections.Generic;
-using System.Text;
-using System.Reflection;
 using Models.Core;
-using APSIM.Shared.Utilities;
 
 namespace Models.Functions
 {
@@ -24,7 +19,7 @@ namespace Models.Functions
         /// <summary>The x property</summary>
         [Description("XProperty")]
         public string XProperty { get; set; }
-        
+
         /// <summary>
         /// The trigger value on the X axis
         /// </summary>
@@ -80,15 +75,6 @@ namespace Models.Functions
                 return 0;
             else
                 return Math.Max(0.0, (x - XTrigger)) * Slope;
-        }
-
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            yield return new Paragraph($"*{Name}* is calculated as a function of *{StringUtilities.RemoveTrailingString(XProperty, ".Value()")}*");
-            yield return new Paragraph($"*Trigger value {XTrigger} Gradient {Slope}*");
         }
     }
 }

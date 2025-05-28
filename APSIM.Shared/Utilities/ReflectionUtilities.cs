@@ -1,17 +1,19 @@
 ﻿namespace APSIM.Shared.Utilities
 {
+    using DeepCloner.Core;
     using Newtonsoft.Json;
+    using Newtonsoft.Json.Linq;
     using Newtonsoft.Json.Serialization;
     using System;
     using System.Collections;
     using System.Collections.Generic;
-    using System.ComponentModel;
     using System.Globalization;
     using System.IO;
     using System.Linq;
     using System.Reflection;
+    using System.Runtime.Loader;
     using System.Runtime.Serialization;
-    using System.Runtime.Serialization.Formatters.Binary;
+    using System.Xml.Serialization;
 
     /// <summary>
     /// Utility class with reflection functions
@@ -54,14 +56,88 @@
         /// Return all properties. The normal .NET reflection doesn't return private fields in base classes.
         /// This function does.
         /// </summary>
-        public static List<PropertyInfo> GetAllProperties(Type type, BindingFlags flags)
+        public static List<PropertyInfo> GetAllProperties(Type type, BindingFlags flags, bool includeBase)
         {
-            if (type == typeof(Object) || type == null) return new List<PropertyInfo>();
+            var list = new List<PropertyInfo>();
+            if (type == typeof(Object) || type == null) 
+                return list;
 
-            var list = GetAllProperties(type.BaseType, flags);
+            if (includeBase)
+                list = GetAllProperties(type.BaseType, flags, includeBase);
+
             // in order to avoid duplicates, force BindingFlags.DeclaredOnly
             list.AddRange(type.GetProperties(flags | BindingFlags.DeclaredOnly));
             return list;
+        }
+
+        /// <summary>
+        /// Return all methods. The normal .NET reflection doesn't return private methods in base classes.
+        /// This function does.
+        /// </summary>
+        public static List<MethodInfo> GetAllMethods(Type type, BindingFlags flags, bool includeBase)
+        {
+            var list = new List<MethodInfo>();
+            if (type == typeof(Object) || type == null)
+                return list;
+
+            if (includeBase)
+                list = GetAllMethods(type.BaseType, flags, includeBase);
+
+            // in order to avoid duplicates, force BindingFlags.DeclaredOnly
+            list.AddRange(type.GetMethods(flags | BindingFlags.DeclaredOnly).ToList());
+            return list;
+        }
+
+        /// <summary>
+        /// Return all methods, with property methods removed from the list.
+        /// </summary>
+        public static List<MethodInfo> GetAllMethodsWithoutProperties(Type type)
+        {
+            List<MethodInfo> methods = ReflectionUtilities.GetAllMethods(type, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, false);
+            List<PropertyInfo> properties = ReflectionUtilities.GetAllProperties(type, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, false);
+
+            //remove methods with < or > in the name, these don't actually exist in the source.
+            for (int i = methods.Count - 1; i >= 0; i--)
+            {
+                string name = methods[i].Name;
+                if (name.Contains("<") || name.Contains(">"))
+                {
+                    methods.Remove(methods[i]);
+                }
+            }
+
+            //remove properties from methods list
+            foreach (PropertyInfo prop in properties)
+            {
+                for (int i = methods.Count - 1; i >= 0; i--)
+                {
+                    string name = methods[i].Name;
+                    if (name.CompareTo("get_" + prop.Name) == 0 || name.CompareTo("set_" + prop.Name) == 0)
+                    {
+                        methods.Remove(methods[i]);
+                    }
+                }
+            }
+            return methods;
+        }
+
+        /// <summary>
+        /// Return all methods, with property methods removed from the list.
+        /// </summary>
+        public static List<MethodInfo> GetAllMethodsForProperty(Type type, PropertyInfo property)
+        {
+            List<MethodInfo> methods = ReflectionUtilities.GetAllMethods(type, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, false);
+            List<MethodInfo> propMethods = new List<MethodInfo>();
+
+            for (int i = 0; i < methods.Count; i++)
+            {
+                string name = methods[i].Name;
+                if (name.CompareTo("get_" + property.Name) == 0 || name.CompareTo("set_" + property.Name) == 0)
+                {
+                    propMethods.Add(methods[i]);
+                }
+            }
+            return methods;
         }
 
         /// <summary>
@@ -309,67 +385,115 @@
         }
 
         /// <summary>
-        /// Binary serialise the object and return the resulting stream.
-        /// </summary>
-        public static Stream BinarySerialise(object source)
-        {
-            if (source == null)
-                return null;
-
-            if (!source.GetType().IsSerializable)
-                throw new ArgumentException("The type must be serializable.", "source");
-
-            IFormatter formatter = new BinaryFormatter();
-            Stream stream = new MemoryStream();
-            formatter.Serialize(stream, source);
-            return stream;
-        }
-
-        /// <summary>
-        /// Binary deserialise the specified stream and return the resulting object
-        /// </summary>
-        public static object BinaryDeserialise(Stream stream)
-        {
-            if (stream == null)
-                return null;
-
-            IFormatter formatter = new BinaryFormatter();
-            return formatter.Deserialize(stream);
-        }
-
-        /// <summary>
         /// Convert an object into a json string. 
         /// </summary>
         /// <param name="source">The source object.</param>
         /// <param name="includePrivates">Serialise private members as well as publics?</param>
+        /// <param name="includeChildren">Serialize child models as well?</param>
         /// <returns>The string representation of the object.</returns>
-        public static string JsonSerialise(object source, bool includePrivates)
+        public static string JsonSerialise(object source, bool includePrivates, bool includeChildren = true)
         {
             return JsonConvert.SerializeObject(source, Formatting.Indented,
                     new JsonSerializerSettings
                     {
-                        ContractResolver = new DynamicContractResolver(includePrivates),
+                        ContractResolver = new DynamicContractResolver(includePrivates, includeChildren, false),
                         ReferenceLoopHandling = ReferenceLoopHandling.Ignore
                     });
+        }
+
+        /// <summary>
+        /// Convert an object into a json stream. 
+        /// </summary>
+        /// <param name="source">The source object.</param>
+        /// <returns>The string representation of the object.</returns>
+        public static Stream JsonSerialiseToStream(object source)
+        {
+            JsonSerializerSettings jSettings = new JsonSerializerSettings()
+            {
+                ContractResolver = new DynamicContractResolver(true, true, true),
+                ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
+                TypeNameHandling = TypeNameHandling.Objects,
+                NullValueHandling = NullValueHandling.Include,
+                ObjectCreationHandling = ObjectCreationHandling.Replace,
+                DefaultValueHandling = DefaultValueHandling.Include
+            };
+            string jString = JsonConvert.SerializeObject(source, Formatting.Indented, jSettings);
+            MemoryStream jStream = new MemoryStream();
+            StreamWriter writer = new StreamWriter(jStream);
+            writer.Write(jString);
+            writer.Flush();
+
+            jStream.Position = 0; ;
+            return jStream;
+            
+        }
+        
+        /// <summary>
+        /// Convert a JSON stream into an object
+        /// </summary>
+        /// <param name="jStream"></param>
+        /// <returns></returns>
+        public static object JsonDeserialise(Stream jStream)
+        {
+            if (jStream == null)
+                return null;
+
+            using (StreamReader sr = new StreamReader(jStream))
+            {
+                string jString = sr.ReadToEnd();
+                JsonSerializerSettings jSettings = new JsonSerializerSettings()
+                {
+                    ContractResolver = new DynamicContractResolver(true, true, true),
+                    ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
+                    TypeNameHandling = TypeNameHandling.Objects,
+                    NullValueHandling = NullValueHandling.Include,
+                    ObjectCreationHandling = ObjectCreationHandling.Replace,
+                    DefaultValueHandling = DefaultValueHandling.Include,
+                    ConstructorHandling = ConstructorHandling.AllowNonPublicDefaultConstructor
+                };
+                object result = JsonConvert.DeserializeObject(jString, jSettings);
+                // Newtonsoft Json cannot readily determine the object type when
+                // deserializing a DataTable. If the DataTable is a field within another object,
+                // tagging with [JsonConverter(typeof(DataTableConverter))] fixes the problem, but 
+                // a stand-alone DataTable is problematic, and will just deserialize to a JArray.
+                // This can be a problem in APSIM.Server and associated unit tests. Here we do
+                // a clumsy work-around by assuming a returned JArray should really be treated
+                // as a DataTable, and force it to be deserialized as such. Note, however, that
+                // the Name of the DataTable is not available with this procedure.
+                // This should work with our limited use of JSON in the context of APSIM.Server,
+                // but could be a problem if applied in other contexts.
+                if (result is JArray)
+                    return JsonConvert.DeserializeObject<System.Data.DataTable>(jString);
+                else
+                    return result;
+            } 
         }
 
         ///<summary> Custom Contract resolver to stop deseralization of Parent properties </summary>
         private class DynamicContractResolver : DefaultContractResolver
         {
             private BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.FlattenHierarchy;
+            private readonly bool includeChildren;
+            private readonly bool excludeReadonly;
 
-            public DynamicContractResolver(bool includePrivates)
+            public DynamicContractResolver(bool includePrivates, bool includeChildren, bool excludeReadonly)
             {
+                this.includeChildren = includeChildren;
+                this.excludeReadonly = excludeReadonly;
                 if (includePrivates)
                     bindingFlags |= BindingFlags.NonPublic;
             }
 
             protected override IList<JsonProperty> CreateProperties(Type type, MemberSerialization memberSerialization)
             {
-                var props = GetAllFields(type, bindingFlags).Select(p => base.CreateProperty(p, memberSerialization))
-                            .Union(
-                            GetAllProperties(type, bindingFlags).Select(p => base.CreateProperty(p, memberSerialization))
-                            ).ToList();
+                IEnumerable<JsonProperty> fields = GetAllFields(type, bindingFlags).Select(p => base.CreateProperty(p, memberSerialization));
+                IEnumerable<JsonProperty> properties = GetAllProperties(type, bindingFlags, true).Select(p => base.CreateProperty(p, memberSerialization));
+                if (!includeChildren)
+                    properties = properties.Where(p => p.PropertyName != "Children");
+                List<JsonProperty> props = fields.Union(properties).ToList();
+                if (excludeReadonly)
+                    props = props.Where(p => p.Writable).ToList();
+
                 // If this type overrides a base class's property or field, then this list
                 // will contain multiple properties with the same name, which causes a
                 // serialization exception when we go to serialize these properties. The
@@ -379,8 +503,15 @@
                 props.ForEach(p => { p.Writable = true; });
                 return props.Where(p => p.PropertyName != "Parent" && p.Readable).ToList();
             }
-        }
 
+            protected override JsonContract CreateContract(Type objectType)
+            {
+                JsonContract contract = base.CreateContract(objectType);
+
+                return contract;
+            }
+
+        }
 
         /// <summary>
         /// Convert the specified 'stringValue' into an object of the specified 'type'
@@ -476,6 +607,15 @@
             if (dataType.IsEnum)
                 return Enum.Parse(dataType, newValue, true);
 
+            // Bools as ints - special case
+            if (dataType == typeof(int))
+            {
+                if (newValue.Equals("true", StringComparison.InvariantCultureIgnoreCase))
+                    return true;
+                if (newValue.Equals("false", StringComparison.InvariantCultureIgnoreCase))
+                    return true;
+            }
+
             // Convert.ChangeType() doesn't seem to work properly on nullable types.
             Type underlyingType = Nullable.GetUnderlyingType(dataType);
             if (underlyingType != null)
@@ -534,9 +674,54 @@
         /// </summary>
         public static object Clone(object sourceObj)
         {
-            Stream stream = BinarySerialise(sourceObj);
-            stream.Seek(0, SeekOrigin.Begin);
-            return BinaryDeserialise(stream);
+            DeepClonerExtensions.SetSuppressedAttributes(typeof(NonSerializedAttribute));
+            return sourceObj.DeepClone();
+        }
+
+        /// <summary>
+        /// Custom SerializationBinder that records the assemblies seen during serialisation
+        /// and reuses them during deserialisation.
+        /// This is useful when working with assemblies from a non-default AssemblyLoadContext,
+        /// because BinaryFormatter cannot deserialise them otherwise.
+        /// </summary>
+        class CachingSerializationBinder : SerializationBinder
+        {
+            private Dictionary<string, Assembly> assemblyCache = new Dictionary<string, Assembly>();
+
+            public override void BindToName(Type serializedType, out string assemblyName, out string typeName)
+            {
+                assemblyName = serializedType.Assembly.FullName;
+                typeName = serializedType.FullName;
+                if (!assemblyCache.ContainsKey(assemblyName))
+                {
+                    assemblyCache[assemblyName] = serializedType.Assembly;
+                }
+                else
+                {
+                    if (assemblyCache[assemblyName] != serializedType.Assembly)
+                    {
+                        throw new FileLoadException(String.Format("Assemblies with the same name from different load contexts are not supported: '{0}'.", assemblyName));
+                    }
+                }
+            }
+
+            public override Type BindToType(string assemblyName, string typeName)
+            {
+                string qualifiedTypeName = String.Format("{0}, {1}", typeName, assemblyName);
+                return Type.GetType(qualifiedTypeName, assemblyResolver: ResolveAssembly, typeResolver: null);
+            }
+
+            private Assembly ResolveAssembly(AssemblyName assemblyName)
+            {
+                if (assemblyCache.ContainsKey(assemblyName.FullName))
+                {
+                    return assemblyCache[assemblyName.FullName];
+                }
+                else
+                {
+                    return AssemblyLoadContext.Default.LoadFromAssemblyName(assemblyName);
+                }
+            }
         }
 
         /// <summary>
@@ -661,6 +846,17 @@
                         return reader.ReadToEnd();
 
             return null;
+        }
+
+        /// <summary>
+        /// Get a string from a resource file stored in the current assembly.
+        /// Returns the string as a string array where each line is an element of the array.
+        /// </summary>
+        /// <param name="resourceName">Name of the resource.</param>
+        public static string[] GetResourceAsStringArray(string resourceName)
+        {
+            string fullString = GetResourceAsString(Assembly.GetCallingAssembly(), resourceName);
+            return fullString.Split('\n'); ;
         }
 
         /// <summary>

@@ -1,11 +1,12 @@
-﻿using APSIM.Shared.Utilities;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
 using Models.Core;
 using Models.Interfaces;
 using Models.PMF.Interfaces;
 using Models.Soils.Arbitrator;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace Models.PMF.Arbitrator
 {
@@ -24,7 +25,7 @@ namespace Models.PMF.Arbitrator
 
         /// <summary>The method used to arbitrate N allocations</summary>
         [Link(Type = LinkType.Ancestor, ByName = true)]
-        protected OrganArbitrator Arbitrator = null;
+        protected IArbitrator Arbitrator = null;
 
         private const double kgha2gsm = 0.1;
 

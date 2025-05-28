@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -69,11 +70,15 @@ namespace APSIM.Documentation.Models
 
         private static async Task DocumentRow(IDocumentationRow row, string path, CancellationToken cancelToken)
         {
+            Stopwatch docStopWatch = Stopwatch.StartNew();
+
             List<Task> tasks = new List<Task>();
             foreach (IDocumentationCell cell in row.Cells)
                 tasks.Add(DocumentCell(cell, path, cancelToken));
             foreach (Task task in tasks)
                 await task.ConfigureAwait(false);
+
+            Console.WriteLine($"Successfully generated doc for {row.Name}. Elapsed time: {docStopWatch.Elapsed.TotalSeconds} seconds.");
         }
 
         private static async Task DocumentCell(IDocumentationCell cell, string path, CancellationToken cancelToken)
@@ -112,38 +117,25 @@ namespace APSIM.Documentation.Models
             // Write rows.
             foreach (IDocumentationRow row in rows)
             {
-                html.AppendLine("<tr>");
-                html.AppendLine($"<td>{row.Name}</td>");
+                html.Append($"<tr><td>{row.Name}</td><td>");
                 uint numCells = 1;
                 foreach (IDocumentationCell cell in row.Cells)
                 {
-                    html.AppendLine("<td>");
-                    IEnumerable<string> files = cell.Files.Select(f => $"<p><a href=\"{GetUrl(f)}\" target=\"blank\">{f.Name}</a></p>");
+                    if (numCells != 1)
+                        html.Append(", ");
+
+                    IEnumerable<string> files = cell.Files.Select(f => $"<a href=\"{f.OutputFileName}\" target=\"blank\">{f.Name}</a>");
                     // fixme - insert actual links with remote path.
-                    string links = string.Join("", files);
-                    html.AppendLine(links);
-                    html.AppendLine("</td>");   
+                    string links = string.Join(", ", files);
+                    html.Append(links);
+
                     numCells++;
                 }
-                while (numCells < numColumns)
-                {
-                    html.AppendLine("<td></td>");
-                    numCells++;
-                }
-                html.AppendLine("</tr>");
+                html.AppendLine("</td></tr>");
             }
             html.AppendLine("</table>");
 
-            html.AppendLine("</body>");
-            html.AppendLine("</html>");
             return html.ToString();
-        }
-
-        private object GetUrl(IDocumentationFile file)
-        {
-            if (file is ExternalDocument)
-                return file.OutputFileName;
-            return $"https://apsimdev.apsim.info/ApsimX/Releases/{Simulations.ApsimVersion}/{file.OutputFileName}";
         }
     }
 }

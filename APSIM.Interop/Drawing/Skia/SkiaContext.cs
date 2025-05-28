@@ -179,11 +179,11 @@ namespace APSIM.Interop.Drawing.Skia
         }
 
         /// <inheritdoc />
-        public (int Left, int Right, int Width, int Height) GetPixelExtents(string text, bool bold, bool italics)
+        public (int Left, int Top, int Width, int Height) GetPixelExtents(string text, bool bold, bool italics)
         {
             // tbi: account for text formatting.
             var rect = GetTextExtents(text);
-            return (rect.Left, rect.Right, rect.Width, rect.Height);
+            return (rect.Left, rect.Top, rect.Width, rect.Height);
         }
 
         /// <inheritdoc />
@@ -247,16 +247,9 @@ namespace APSIM.Interop.Drawing.Skia
         /// <summary>
         /// Save the current state of the drawing context to an image.
         /// </summary>
-        public Image Save()
+        public SKImage Save()
         {
-            using (SKImage image = SKImage.FromBitmap(bitmap))
-            using (SKData data = image.Encode(SKEncodedImageFormat.Png, 100))
-            using (MemoryStream stream = new MemoryStream())
-            {
-                data.SaveTo(stream);
-                stream.Seek(0, SeekOrigin.Begin);
-                return Image.FromStream(stream);
-            }
+            return SKImage.FromBitmap(bitmap);
         }
 
         /// <inheritdoc />

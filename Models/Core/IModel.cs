@@ -1,9 +1,8 @@
-﻿
+﻿using System;
+using System.Collections.Generic;
+
 namespace Models.Core
 {
-    using System;
-    using System.Collections.Generic;
-    using APSIM.Shared.Documentation;
 
     /// <summary>
     /// The IModel interface specifies the properties and methods that all
@@ -15,6 +14,9 @@ namespace Models.Core
         /// Gets or sets the name of the model.
         /// </summary>
         string Name { get; set; }
+
+        /// <summary>The name of the resource.</summary>
+        string ResourceName { get; set; }
 
         /// <summary>
         /// Gets or sets the parent model. Can be null if model has no parent.
@@ -278,8 +280,16 @@ namespace Models.Core
         /// Returns null if not found.
         /// </summary>
         /// <param name="path">The path of the variable/model.</param>
-        /// <param name="ignoreCase">Perform a case-insensitive search?</param>
-        IVariable FindByPath(string path, bool ignoreCase = false);
+        /// <param name="flags">LocatorFlags controlling the search</param>
+        IVariable FindByPath(string path, LocatorFlags flags = LocatorFlags.None);
+
+        /// <summary>
+        /// Find and return multiple matches (e.g. a soil in multiple zones) for a given path.
+        /// Note that this can be a variable/property or a model.
+        /// Returns null if not found.
+        /// </summary>
+        /// <param name="path">The path of the variable/model.</param>
+        IEnumerable<IVariable> FindAllByPath(string path);
 
         /// <summary>
         /// Called when the model has been newly created in memory whether from 
@@ -294,12 +304,5 @@ namespace Models.Core
         /// </summary>
         void OnPreLink();
 
-        /// <summary>
-        /// Document the model, and any child models which should be documented.
-        /// </summary>
-        /// <remarks>
-        /// It is a mistake to call this method without first resolving links.
-        /// </remarks>
-        IEnumerable<ITag> Document();
     }
 }

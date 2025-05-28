@@ -1,14 +1,14 @@
-﻿using APSIM.Shared.Utilities;
+﻿using System;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
 using Models.Core;
 using Models.PMF.Interfaces;
-using System;
-
 
 namespace Models.PMF
 {
     /// <summary>
     /// Relative allocation rules used to determine partitioning.
-    /// 
+    ///
     /// Arbitration is performed in two passes for each of the supply sources.
     /// On the first pass, biomass or nutrient supply is allocated to structural
     /// and metabolic pools of each organ based on their demand relative to the
@@ -58,13 +58,18 @@ namespace Models.PMF
                 double StorageRequirement = Math.Max(0.0, BAT.StorageDemand[i] - BAT.StorageAllocation[i]); //N needed to take organ up to maximum N concentration, Structural, Metabolic and Luxury N demands
                 if (StorageRequirement > 0.0)
                 {
-                    double StorageAllocation = Math.Min(FirstPassNotAllocated * MathUtilities.Divide(BAT.StorageDemand[i], totalStorageDemand, 0), StorageRequirement);
+                    double StorageAllocation;
+                    if (MathUtilities.FloatsAreEqual(BAT.TotalStorageDemand, 0.0, 0.000001))
+                        StorageAllocation = 0;
+                    else
+                        StorageAllocation = Math.Min(FirstPassNotAllocated * MathUtilities.Divide(BAT.StorageDemand[i], BAT.TotalStorageDemand, 0), StorageRequirement);
+
                     BAT.StorageAllocation[i] += Math.Max(0, StorageAllocation);
                     NotAllocated -= StorageAllocation;
                     TotalAllocated += StorageAllocation;
                 }
             }
-            //Set the amount of biomass not allocated.  Note, that this value is overwritten following by each arbitration step so if it is to be used correctly 
+            //Set the amount of biomass not allocated.  Note, that this value is overwritten following by each arbitration step so if it is to be used correctly
             //it must be caught in that step.  Currently only using to catch DM not allocated so we can report as sink limitaiton
             BAT.NotAllocated = NotAllocated;
         }

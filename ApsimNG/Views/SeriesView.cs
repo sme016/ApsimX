@@ -12,7 +12,7 @@
 
         private Grid table1;
 
-        private VBox vbox1 = null;
+        private Box vbox1 = null;
         private Label label4 = null;
         private Label label5 = null;
 
@@ -40,11 +40,12 @@
         /// <summary>Initializes a new instance of the <see cref="SeriesView" /> class</summary>
         public SeriesView(ViewBase owner) : base(owner)
         {
+            // The glade file no longer provides much of use, with all the
+            // layout work being done here in code. THe glade file could be
+            // eliminated entirely
             Builder builder = BuilderFromResource("ApsimNG.Resources.Glade.SeriesView.glade");
-            vbox1 = (VBox)builder.GetObject("vbox1");
+            vbox1 = (Box)builder.GetObject("vbox1");
 
-            Widget table = (Widget)builder.GetObject("table1");
-            vbox1.Remove(table);
             table1 = new Grid();
             table1.ColumnSpacing = 10;
             // Set expand to false on this grid, to ensure that any extra space
@@ -52,8 +53,6 @@
             vbox1.PackStart(table1, false, true, 0);
             vbox1.ReorderChild(table1, 0);
 
-            label4 = (Label)builder.GetObject("label4");
-            label5 = (Label)builder.GetObject("label5");
             mainWidget = vbox1;
 
             graphView1 = new GraphView(this);
@@ -90,15 +89,15 @@
             helpBox = new EventBox();
             helpBox.Add(helpImage);
             helpBox.ButtonReleaseEvent += Help_ButtonPressEvent;
-            HBox filterBox = new HBox();
+            Box filterBox = new Box(Orientation.Horizontal, 0);
             filterBox.PackStart(editView1.MainWidget, true, true, 0);
             filterBox.PackEnd(helpBox, false, true, 0);
 
             table1.Attach(new Label("Data Source:") { Xalign = 0 }, 0, 0, 1, 1);
             table1.Attach(new Label("X:") { Xalign = 0 }, 0, 1, 1, 1);
             table1.Attach(new Label("Y:") { Xalign = 0 }, 0, 2, 1, 1);
-            label4 = new Label("Y2:") { Xalign = 0 };
-            label5 = new Label("X2:") { Xalign = 0 };
+            label4 = new Label("X2:") { Xalign = 0 };
+            label5 = new Label("Y2:") { Xalign = 0 };
             table1.Attach(label4, 0, 3, 1, 1);
             table1.Attach(label5, 0, 4, 1, 1);
             table1.Attach(new Label("Type:") { Xalign = 0 }, 0, 5, 1, 1);
@@ -111,8 +110,8 @@
             table1.Attach(dataSourceDropDown.MainWidget, 1, 0, 1, 1/*, 10, 2*/);
             table1.Attach(xDropDown.MainWidget, 1, 1, 1, 1/*10, 2*/);
             table1.Attach(yDropDown.MainWidget, 1, 2, 1, 1/*10, 2*/);
-            table1.Attach(y2DropDown.MainWidget, 1, 3, 1, 1/*10, 2*/);
-            table1.Attach(x2DropDown.MainWidget, 1, 4, 1, 1/*10, 2*/);
+            table1.Attach(x2DropDown.MainWidget, 1, 3, 1, 1/*10, 2*/);
+            table1.Attach(y2DropDown.MainWidget, 1, 4, 1, 1/*10, 2*/);
             table1.Attach(seriesDropDown.MainWidget, 1, 5, 1, 1/*10, 2*/);
             table1.Attach(lineTypeDropDown.MainWidget, 1, 6, 1, 1/*10, 2*/);
             table1.Attach(markerTypeDropDown.MainWidget, 1, 7, 1, 1/*10, 2*/);
@@ -142,25 +141,25 @@
             {
                 mainWidget.Destroyed -= _mainWidget_Destroyed;
                 helpBox.ButtonReleaseEvent -= Help_ButtonPressEvent;
-                dataSourceDropDown.MainWidget.Dispose();
-                xDropDown.MainWidget.Dispose();
-                yDropDown.MainWidget.Dispose();
-                x2DropDown.MainWidget.Dispose();
-                y2DropDown.MainWidget.Dispose();
-                seriesDropDown.MainWidget.Dispose();
-                lineTypeDropDown.MainWidget.Dispose();
-                markerTypeDropDown.MainWidget.Dispose();
-                colourDropDown.MainWidget.Dispose();
-                lineThicknessDropDown.MainWidget.Dispose();
-                markerSizeDropDown.MainWidget.Dispose();
-                checkBoxView1.MainWidget.Dispose();
-                checkBoxView2.MainWidget.Dispose();
-                checkBoxView3.MainWidget.Dispose();
-                checkBoxView4.MainWidget.Dispose();
-                checkBoxView5.MainWidget.Dispose();
-                checkBoxView6.MainWidget.Dispose();
-                graphView1.MainWidget.Dispose();
-                editView1.MainWidget.Dispose();
+                dataSourceDropDown.Dispose();
+                xDropDown.Dispose();
+                yDropDown.Dispose();
+                x2DropDown.Dispose();
+                y2DropDown.Dispose();
+                seriesDropDown.Dispose();
+                lineTypeDropDown.Dispose();
+                markerTypeDropDown.Dispose();
+                colourDropDown.Dispose();
+                lineThicknessDropDown.Dispose();
+                markerSizeDropDown.Dispose();
+                checkBoxView1.Dispose();
+                checkBoxView2.Dispose();
+                checkBoxView3.Dispose();
+                checkBoxView4.Dispose();
+                checkBoxView5.Dispose();
+                checkBoxView6.Dispose();
+                graphView1.Dispose();
+                editView1.Dispose();
                 owner = null;
             }
             catch (Exception err)
@@ -244,7 +243,7 @@
             try
             {
                 if (args.Event.Button == 1)
-                    ProcessUtilities.ProcessStart("https://apsimnextgeneration.netlify.com/usage/graphs/graphfilters/");
+                    ProcessUtilities.ProcessStart("https://apsimnextgeneration.netlify.app/usage/graphs/graphfilters/");
             }
             catch (Exception err)
             {

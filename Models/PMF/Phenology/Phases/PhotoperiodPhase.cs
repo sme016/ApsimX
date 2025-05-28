@@ -1,10 +1,7 @@
 ﻿using System;
-using APSIM.Shared.Documentation;
-using System.Collections.Generic;
 using Models.Core;
 using Models.Functions;
 using Newtonsoft.Json;
-using System.Text;
 
 namespace Models.PMF.Phen
 {
@@ -28,9 +25,9 @@ namespace Models.PMF.Phen
         [Description("Critical photoperiod to move into next phase")]
         public double CricialPhotoperiod { get; set; }
 
-            /// <summary>
-            ///  Photoperiod Type
-            /// </summary>
+        /// <summary>
+        ///  Photoperiod Type
+        /// </summary>
         public enum PPType
         {
             /// <summary>
@@ -43,7 +40,7 @@ namespace Models.PMF.Phen
             Decreasing
         }
 
-            /// <summary>Flag to specify whether photoperiod should be increasing</summary>
+        /// <summary>Flag to specify whether photoperiod should be increasing</summary>
         [Description("Flag to specify whether photoperiod should be increasing")]
         public PPType PPDirection { get; set; }
 
@@ -55,10 +52,14 @@ namespace Models.PMF.Phen
         [Description("End")]
         public string End { get; set; }
 
+        /// <summary>Is the phase emerged from the ground?</summary>
+        [Description("Is the phase emerged?")]
+        public bool IsEmerged { get; set; } = true;
+
         /// <summary>Fraction of phase that is complete (0-1).</summary>
         [JsonIgnore]
         public double FractionComplete { get; }
-        
+
         /// <summary>Units of progress through phase on this time step.</summary>
         [JsonIgnore]
         public double ProgressionForTimeStep { get; set; }
@@ -88,16 +89,5 @@ namespace Models.PMF.Phen
         /// <summary>Resets the phase.</summary>
         public void ResetPhase() { }
 
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // Write description of this class.
-            StringBuilder text = new StringBuilder($"This phase goes from {Start} to {End}. ");
-            text.Append("The phase ends when photoperiod has a reaches a critical photoperiod with a given direction (Increasing/Decreasing). ");
-            text.Append($"The base model uses a critical photoperiod of {CricialPhotoperiod} hours ({PPDirection}).");
-            yield return new Paragraph(text.ToString());
-        }
     }
 }

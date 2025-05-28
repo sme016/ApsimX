@@ -1,9 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using Models.Core;
+using APSIM.Numerics;
 using APSIM.Shared.Utilities;
-using Models.Soils;
+using Models.Core;
 using Models.Interfaces;
+using Models.Soils;
 
 namespace Models.Functions
 {
@@ -25,10 +25,10 @@ namespace Models.Functions
         public double Value(int arrayIndex = -1)
         {
             if (arrayIndex == -1)
-                throw new Exception("Layer number must be provided to CERES Nitrification Model");
+                throw new Exception("Layer number must be provided to CERES Denitrification Water Factor Model");
 
-            double WF = MathUtilities.Divide(soilwater.SW[arrayIndex] - physical.DUL[arrayIndex], physical.SAT[arrayIndex] - physical.DUL[arrayIndex], 0.0);     
-            return MathUtilities.Bound(WF, 0, 1); 
+            double WF = MathUtilities.Divide(soilwater.SW[arrayIndex] - physical.DUL[arrayIndex], physical.SAT[arrayIndex] - physical.DUL[arrayIndex], 0.0);
+            return MathUtilities.Bound(WF, 0, 1);
         }
 
         /// <summary>

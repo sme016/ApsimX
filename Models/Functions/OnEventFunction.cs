@@ -1,7 +1,4 @@
 ﻿using System;
-using APSIM.Shared.Documentation;
-using System.Collections.Generic;
-using System.Text;
 using Models.Core;
 using Models.PMF.Phen;
 
@@ -24,7 +21,7 @@ namespace Models.Functions
 
         /// <summary>The re set event</summary>
         [Description("(optional) The event resets to pre event value")]
-        public string ReSetEvent {get; set;}
+        public string ReSetEvent { get; set; }
 
 
         /// <summary>The pre event value</summary>
@@ -37,8 +34,17 @@ namespace Models.Functions
         /// <summary>Called when [simulation commencing].</summary>
         /// <param name="sender">The sender.</param>
         /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
-        [EventSubscribe("Commencing")]
-        private void OnSimulationCommencing(object sender, EventArgs e)
+        [EventSubscribe("Sowing")]
+        private void OnSowing(object sender, EventArgs e)
+        {
+            _Value = PreEventValue.Value();
+        }
+
+        /// <summary>Called when cutting.</summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+        [EventSubscribe("Cutting")]
+        private void OnCutting(object sender, EventArgs e)
         {
             _Value = PreEventValue.Value();
         }
@@ -56,37 +62,10 @@ namespace Models.Functions
                 _Value = PreEventValue.Value();
         }
 
-        /// <summary>Called when crop is being harvested.</summary>
-        [EventSubscribe("Cutting")]
-        private void OnHarvesting(object sender, EventArgs e)
-        {
-            _Value = PreEventValue.Value();
-        }
-
         /// <summary>Gets the value.</summary>
         public double Value(int arrayIndex = -1)
         {
             return _Value;
-        }
-
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            if (PreEventValue != null)
-            {
-                yield return new Paragraph($"Before {SetEvent}");
-                foreach (ITag tag in PreEventValue.Document())
-                    yield return tag;
-            }
-
-            if (PostEventValue != null)
-            {
-                yield return new Paragraph($"On {SetEvent} the value is set to:");
-                foreach (ITag tag in PostEventValue.Document())
-                    yield return tag;
-            }
         }
     }
 }

@@ -20,8 +20,8 @@ namespace Models.Core
         }
 
         /// <summary>Initializes a new instance of the <see cref="ApsimXException"/> class.</summary>
-        protected ApsimXException(SerializationInfo info, StreamingContext context)
-        : base(info, context)
+        [Obsolete]
+        protected ApsimXException(SerializationInfo info, StreamingContext context): base(info, context)
         { }
 
         /// <summary>Initializes a new instance of the <see cref="ApsimXException"/> class.</summary>
@@ -32,7 +32,7 @@ namespace Models.Core
         {
             this.model = model;
         }
-        
+
         /// <summary>Initializes a new instance of the <see cref="ApsimXException"/> class.</summary>
         /// <param name="model">The model.</param>
         /// <param name="message">The message.</param>
@@ -42,6 +42,6 @@ namespace Models.Core
         {
             this.model = model;
         }
-        
+
     }
 }

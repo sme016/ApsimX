@@ -4,14 +4,15 @@
 // Shortcuts (accelerators in Gtk terminology) haven't yet been implemented.
 // Link doesn't work, but it appears that move and link aren't working in the Windows.Forms implementation either.
 // Actually, Move "works" here but doesn't undo correctly
+using Gtk;
+using GLib;
+using System;
+using UserInterface.Interfaces;
 
 namespace UserInterface.Views
 {
-    using global::UserInterface.Extensions;
-    using Gtk;
-    using Interfaces;
-    using System;
-    
+
+
     /// <summary>
     /// An ExplorerView is a "Windows Explorer" like control that displays a virtual tree control on the left
     /// and a user interface on the right allowing the user to modify properties of whatever they
@@ -19,21 +20,24 @@ namespace UserInterface.Views
     /// </summary>
     public class ExplorerView : ViewBase, IExplorerView
     {
-        private VBox rightHandView;
+        private Box rightHandView;
         private Gtk.TreeView treeviewWidget;
         private MarkdownView descriptionView;
+        private Paned hpaned;
 
         /// <summary>Default constructor for ExplorerView</summary>
         public ExplorerView(ViewBase owner) : base(owner)
         {
             Builder builder = BuilderFromResource("ApsimNG.Resources.Glade.ExplorerView.glade");
-            mainWidget = (VBox)builder.GetObject("vbox1");
+            mainWidget = (Box)builder.GetObject("vbox1");
             ToolStrip = new ToolStripView((Toolbar)builder.GetObject("toolStrip"));
+            hpaned = (Paned)builder.GetObject("hpaned1");
+            hpaned.AddNotification(OnDividerNotified);
 
             treeviewWidget = (Gtk.TreeView)builder.GetObject("treeview1");
             treeviewWidget.Realized += OnLoaded;
             Tree = new TreeView(owner, treeviewWidget);
-            rightHandView = (VBox)builder.GetObject("vbox2");
+            rightHandView = (Box)builder.GetObject("vbox2");
             //rightHandView.ShadowType = ShadowType.EtchedOut;
 
             mainWidget.Destroyed += OnDestroyed;
@@ -48,21 +52,22 @@ namespace UserInterface.Views
         /// <summary>The toolstrip at the top of the explorer view</summary>
         public IToolStripView ToolStrip { get; private set; }
 
+        /// <summary>Position of the divider between the tree and content</summary>
+        public int DividerPosition { get; set; }
+
+        /// <summary>Invoked when the divider position is changed</summary>
+        public event EventHandler DividerChanged;
+
         /// <summary>
         /// Add a user control to the right hand panel. If Control is null then right hand panel will be cleared.
         /// </summary>
         /// <param name="control">The control to add.</param>
         public void AddRightHandView(object control)
         {
+
             // Remove existing right hand view.
-            foreach (var child in rightHandView.Children)
-            {
-                if (child != (descriptionView as ViewBase)?.MainWidget)
-                {
-                    rightHandView.Remove(child);
-                    child.Dispose();
-                }
-            }
+            if (CurrentRightHandView != null)
+                CurrentRightHandView.Dispose();
 
             ViewBase view = control as ViewBase;
             if (view != null)
@@ -83,9 +88,10 @@ namespace UserInterface.Views
             {
                 if (descriptionView != null)
                 {
-                    Widget descriptionWidget = (descriptionView as ViewBase).MainWidget;
-                    rightHandView.Remove(descriptionWidget);
-                    descriptionWidget.Dispose();
+                    descriptionView.Dispose();
+                    //Widget descriptionWidget = (descriptionView as ViewBase).MainWidget;
+                    //rightHandView.Remove(descriptionWidget);
+                    //descriptionWidget.Dispose();
                 }
                 descriptionView = null;
             }
@@ -94,7 +100,19 @@ namespace UserInterface.Views
                 if (descriptionView == null)
                 {
                     descriptionView = new MarkdownView(this);
+                    // Set PropagateNaturalHeight to true, to ensure that the
+                    // scrolled window requests enough space to not require a
+                    // scrollbar by default. We could change MarkdownView to
+                    // always do this, but it's used in lots of other places, so
+                    // that may have unintended consequences and would require
+                    // more extensive testing.
+                    if (descriptionView.MainWidget is ScrolledWindow scroller)
+                        scroller.PropagateNaturalHeight = true;
                     rightHandView.PackStart(descriptionView.MainWidget, false, false, 0);
+                    // Let Gtk catch up with things; otherwise too much space
+                    // is allocated to the new description view. Is there a better way?
+                    while (Gtk.Application.EventsPending())
+                        Gtk.Application.RunIteration();
                 }
                 descriptionView.Text = description;
             }
@@ -106,6 +124,15 @@ namespace UserInterface.Views
 
             throw new NotImplementedException();
 
+        }
+
+        /// <summary>Listens to an event of the divider position changing</summary>
+        /// <param name="sender"></param>
+        /// <param name="args"></param>
+        private void OnDividerNotified(object sender, NotifyArgs args)
+        {
+            if (DividerChanged != null)
+                DividerChanged.Invoke(sender, new EventArgs());
         }
 
         /// <summary>
@@ -132,7 +159,7 @@ namespace UserInterface.Views
                 ShowError(err);
             }
         }
-        
+
         /// <summary>
         /// Widget has been destroyed - clean up.
         /// </summary>
@@ -153,6 +180,7 @@ namespace UserInterface.Views
                 }
                 ToolStrip.Destroy();
                 mainWidget.Destroyed -= OnDestroyed;
+                hpaned.RemoveNotification(OnDividerNotified);
                 owner = null;
             }
             catch (Exception err)

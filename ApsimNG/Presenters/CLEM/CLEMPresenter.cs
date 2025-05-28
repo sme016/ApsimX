@@ -83,7 +83,8 @@ namespace UserInterface.Presenters
                           BindingFlags.Instance
                           );
 
-                    bool categoryAttributeFound = (props.Where(prop => prop.IsDefined(typeof(CategoryAttribute), false)).Count() > 0);
+                    // check if any category attribtes other than "*" fould and if so make this a PropertyCategoryPresenter
+                    bool categoryAttributeFound = props.Where(prop => prop.IsDefined(typeof(CategoryAttribute), false) && (prop.GetCustomAttribute(typeof(CategoryAttribute)) as CategoryAttribute).Category != "*").Any();
                     if (categoryAttributeFound)
                     {
                         propPresenterName = "UserInterface.Presenters.PropertyCategorisedPresenter";
@@ -160,9 +161,15 @@ namespace UserInterface.Presenters
                         PresenterList.TryGetValue("Summary", out IPresenter selectedPresenter);
                         (selectedPresenter as CLEMSummaryPresenter).Refresh();
                     }
+                    else if (ClemModel.SelectedTab == "Messages")
+                    {
+                        PresenterList.TryGetValue("Messages", out IPresenter selectedPresenter);
+                        (selectedPresenter as MessagePresenter).Refresh();
+                    }
+
                 }
 
-                if(ClemModel != null && ClemModel.SelectedTab is null && PresenterList.Count > 0)
+                if (ClemModel != null && ClemModel.SelectedTab is null && PresenterList.Count > 0)
                     if (PresenterList.FirstOrDefault().Value is IRefreshPresenter)
                         (PresenterList.FirstOrDefault().Value as IRefreshPresenter).Refresh(); 
             }
@@ -191,10 +198,10 @@ namespace UserInterface.Presenters
         public void Detach()
         {
             this.View.TabSelected -= OnTabSelected;
-
             foreach (KeyValuePair<string, IPresenter> valuePair in PresenterList)
                 if(valuePair.Value != null)
                     valuePair.Value.Detach();
+            (this.View as ViewBase).Dispose();
         }
 
     }

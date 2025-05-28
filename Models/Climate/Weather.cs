@@ -1,23 +1,23 @@
-﻿namespace Models.Climate
-{
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Interfaces;
-    using Newtonsoft.Json;
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.Diagnostics.CodeAnalysis;
-    using System.Globalization;
-    using System.IO;
+﻿using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Interfaces;
+using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Globalization;
+using System.IO;
 
+namespace Models.Climate
+{
     ///<summary>
     /// Reads in weather data and makes it available to other models.
     ///</summary>
     [Serializable]
     [ViewName("UserInterface.Views.TabbedMetDataView")]
     [PresenterName("UserInterface.Presenters.MetDataPresenter")]
-    [ValidParent(ParentType=typeof(Simulation))]
+    [ValidParent(ParentType = typeof(Simulation))]
     [ValidParent(ParentType = typeof(Zone))]
     public class Weather : Model, IWeather, IReferenceExternalFiles
     {
@@ -25,7 +25,13 @@
         /// A link to the clock model.
         /// </summary>
         [Link]
-        private Clock clock = null;
+        private IClock clock = null;
+
+        /// <summary>
+        /// A link to the the summary
+        /// </summary>
+        [Link]
+        private ISummary summary = null;
 
         /// <summary>
         /// A reference to the text file reader object
@@ -89,12 +95,6 @@
         /// </summary>
         private int dayLengthIndex;
 
-
-        /// <summary>
-        /// A flag indicating whether this model should do a seek on the weather file
-        /// </summary>
-        private bool doSeek;
-
         /// <summary>
         /// This event will be invoked immediately before models get their weather data.
         /// models and scripts an opportunity to change the weather data before other models
@@ -108,6 +108,19 @@
         /// relative/absolute paths.
         /// </summary>
         private string constantsFile;
+
+        /// <summary>
+        /// A LinkedList of weather that has previously been read.
+        /// Stored in order of date from newest to oldest as most recent weather is most common to search for
+        /// </summary>
+        private LinkedList<WeatherRecordEntry> weatherCache = new LinkedList<WeatherRecordEntry>();
+
+        /// <summary>
+        /// Stores the CO2 value from either the default 350 or from a column in met file. Public property can then also check
+        /// if this value was supplied by a constant
+        /// </summary>
+        [JsonIgnore]
+        private double co2Value { get; set; }
 
         /// <summary>
         /// Allows to specify a second file which contains constants such as lat, long,
@@ -148,7 +161,7 @@
         public string FileName { get; set; }
 
         /// <summary>
-        /// Gets or sets the full file name (with path). The user interface uses this. 
+        /// Gets or sets the full file name (with path). The user interface uses this.
         /// </summary>
         [JsonIgnore]
         public string FullFileName
@@ -156,7 +169,7 @@
             get
             {
                 Simulation simulation = FindAncestor<Simulation>();
-                if (simulation != null)
+                if (simulation != null && simulation.FileName != null)
                     return PathUtilities.GetAbsolutePath(this.FileName, simulation.FileName);
                 else
                 {
@@ -164,16 +177,28 @@
                     if (simulations != null)
                         return PathUtilities.GetAbsolutePath(this.FileName, simulations.FileName);
                     else
-                        return this.FileName;
+                        return PathUtilities.GetAbsolutePath(this.FileName, "");
                 }
             }
             set
             {
                 Simulations simulations = FindAncestor<Simulations>();
                 if (simulations != null)
-                    this.FileName = PathUtilities.GetRelativePath(value, simulations.FileName);
+                    this.FileName = PathUtilities.GetRelativePathAndRootExamples(value, simulations.FileName);
                 else
                     this.FileName = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets the stored file name. The user interface uses this. Use FullFileName to set.
+        /// </summary>
+        [JsonIgnore]
+        public string RelativeFileName
+        {
+            get
+            {
+                return FileName;
             }
         }
 
@@ -258,7 +283,8 @@
         [JsonIgnore]
         public int WinterSolsticeDOY
         {
-            get {
+            get
+            {
                 if (Latitude <= 0)
                 {
                     if (DateTime.IsLeapYear(clock.Today.Year))
@@ -273,7 +299,7 @@
                     else
                         return 355;
                 }
-                }
+            }
         }
 
         private bool First = true;
@@ -344,12 +370,23 @@
         [JsonIgnore]
         public double DayLength { get; set; }
 
-
         /// <summary>
         /// Gets or sets the CO2 level. If not specified in the weather file the default is 350.
         /// </summary>
         [JsonIgnore]
-        public double CO2 { get; set; }
+        public double CO2 {
+            get
+            {
+                if (this.reader == null || this.reader.Constant("co2") == null)
+                    return co2Value;
+                else
+                    return this.reader.ConstantAsDouble("co2");
+            }
+            set
+            {
+                co2Value = value;
+            }
+        }
 
         /// <summary>
         /// Gets or sets the atmospheric air pressure. If not specified in the weather file the default is 1010 hPa.
@@ -361,6 +398,7 @@
         /// <summary>
         /// Gets the latitude
         /// </summary>
+        [JsonIgnore]
         public double Latitude
         {
             get
@@ -370,11 +408,17 @@
 
                 return this.reader.ConstantAsDouble("Latitude");
             }
+            set
+            {
+                if (this.reader != null)
+                    reader.Constant("Latitude").Value = value.ToString();
+            }
         }
 
         /// <summary>
         /// Gets the longitude
         /// </summary>
+        [JsonIgnore]
         public double Longitude
         {
             get
@@ -390,6 +434,7 @@
         /// Gets the average temperature
         /// </summary>
         [Units("°C")]
+        [JsonIgnore]
         public double Tav
         {
             get
@@ -401,11 +446,17 @@
 
                 return this.reader.ConstantAsDouble("tav");
             }
+            set
+            {
+                if (this.reader != null)
+                    reader.Constant("tav").Value = value.ToString();
+            }
         }
 
         /// <summary>
         /// Gets the temperature amplitude.
         /// </summary>
+        [JsonIgnore]
         public double Amp
         {
             get
@@ -417,11 +468,16 @@
 
                 return this.reader.ConstantAsDouble("amp");
             }
+            set
+            {
+                if (this.reader != null)
+                    reader.Constant("amp").Value = value.ToString();
+            }
         }
 
         /// <summary>Met Data from yesterday</summary>
         [JsonIgnore]
-        public DailyMetDataFromFile YesterdaysMetData { get; set; }
+        public DailyMetDataFromFile YesterdaysMetData { get { return GetAdjacentMetData(-1); } }
 
         /// <summary>Met Data for Today</summary>
         [JsonIgnore]
@@ -429,22 +485,22 @@
 
         /// <summary>Met Data from yesterday</summary>
         [JsonIgnore]
-        public DailyMetDataFromFile TomorrowsMetData { get; set; }
+        public DailyMetDataFromFile TomorrowsMetData { get { return GetAdjacentMetData(1); } }
 
         /// <summary>First date of summer.</summary>
-        [JsonIgnore] 
+        [JsonIgnore]
         public string FirstDateOfSummer { get; set; } = "1-dec";
 
         /// <summary>First date of autumn / fall.</summary>
-        [JsonIgnore] 
+        [JsonIgnore]
         public string FirstDateOfAutumn { get; set; } = "1-mar";
 
         /// <summary>First date of winter.</summary>
-        [JsonIgnore] 
+        [JsonIgnore]
         public string FirstDateOfWinter { get; set; } = "1-jun";
 
         /// <summary>First date of spring.</summary>
-        [JsonIgnore] 
+        [JsonIgnore]
         public string FirstDateOfSpring { get; set; } = "1-sep";
 
         /// <summary>
@@ -537,7 +593,18 @@
         /// <returns>Sun set time</returns>
         public double CalculateSunSet()
         {
-            return 12 + CalculateDayLength(-6)/2;
+            return 12 + CalculateDayLength(-6) / 2;
+        }
+
+        /// <summary>
+        /// Check values in weather and return a collection of warnings.
+        /// </summary>
+        public IEnumerable<string> Validate()
+        {
+            if (Amp > 20)
+            {
+                yield return $"The value of Weather.AMP ({Amp}) is > 20 oC. Please check the value.";
+            }
         }
 
         /// <summary>
@@ -546,7 +613,6 @@
         [EventSubscribe("Commencing")]
         private void OnSimulationCommencing(object sender, EventArgs e)
         {
-            this.doSeek = true;
             this.maximumTemperatureIndex = 0;
             this.minimumTemperatureIndex = 0;
             this.radiationIndex = 0;
@@ -558,8 +624,6 @@
             this.co2Index = -1;
             this.DiffuseFractionIndex = 0;
             this.dayLengthIndex = 0;
-            if (CO2 == 0)
-                this.CO2 = 350;
             if (AirPressure == 0)
                 this.AirPressure = 1010;
             if (DiffuseFraction == 0)
@@ -582,6 +646,9 @@
                 FirstDateOfSpring = FirstDateOfAutumn;
                 FirstDateOfAutumn = temp;
             }
+
+            foreach (var message in Validate())
+                summary.WriteMessage(this, message, MessageType.Warning);
         }
 
         /// <summary>
@@ -601,7 +668,7 @@
         {
             if (this.reader != null)
                 this.reader.Close();
-            this.reader = null;            
+            this.reader = null;
         }
 
         /// <summary>
@@ -636,22 +703,7 @@
         [EventSubscribe("DoWeather")]
         private void OnDoWeather(object sender, EventArgs e)
         {
-            if (First)
-            {
-                TodaysMetData = GetMetData(this.clock.Today); //Read first date to get todays data
-                YesterdaysMetData = TodaysMetData; //Use todays Data to represent yesterday on the first day
-                TomorrowsMetData = GetMetData(this.clock.Today.AddDays(1)); // Read another line ahead to get tomorrows data
-            }
-            else
-            { // Move everything forward a day
-                YesterdaysMetData = TodaysMetData;
-                TodaysMetData = TomorrowsMetData;
-                
-                if (clock.Today == clock.EndDate && clock.EndDate == reader.LastDate)
-                    TomorrowsMetData = TodaysMetData;
-                else
-                    TomorrowsMetData = GetMetData(this.clock.Today.AddDays(1));
-            }
+            TodaysMetData = GetMetData(this.clock.Today); //Read first date to get todays data
 
             this.Radn = TodaysMetData.Radn;
             this.MaxT = TodaysMetData.MaxT;
@@ -663,9 +715,8 @@
             this.Wind = TodaysMetData.Wind;
             this.DiffuseFraction = TodaysMetData.DiffuseFraction;
             this.DayLength = TodaysMetData.DayLength;
-            if (co2Index != -1)
-                CO2 = TodaysMetData.CO2;
-            
+            this.CO2 = TodaysMetData.CO2;
+
             if (this.PreparingNewWeatherData != null)
                 this.PreparingNewWeatherData.Invoke(this, new EventArgs());
 
@@ -674,14 +725,14 @@
                 //StartDAWS = met.DaysSinceWinterSolstice;
                 if (clock.Today.DayOfYear < WinterSolsticeDOY)
                 {
-                    if (DateTime.IsLeapYear(clock.Today.Year-1))
-                        DaysSinceWinterSolstice = 366 - WinterSolsticeDOY + clock.Today.DayOfYear;  
+                    if (DateTime.IsLeapYear(clock.Today.Year - 1))
+                        DaysSinceWinterSolstice = 366 - WinterSolsticeDOY + clock.Today.DayOfYear;
                     else
-                        DaysSinceWinterSolstice = 365 - WinterSolsticeDOY + clock.Today.DayOfYear; 
+                        DaysSinceWinterSolstice = 365 - WinterSolsticeDOY + clock.Today.DayOfYear;
                 }
                 else
                     DaysSinceWinterSolstice = clock.Today.DayOfYear - WinterSolsticeDOY;
-                    
+
                 First = false;
             }
 
@@ -689,80 +740,113 @@
                 DaysSinceWinterSolstice = 0;
             else DaysSinceWinterSolstice += 1;
 
-            Qmax = MetUtilities.QMax(clock.Today.DayOfYear + 1, Latitude, MetUtilities.Taz, MetUtilities.Alpha,VP);
+            Qmax = MetUtilities.QMax(clock.Today.DayOfYear + 1, Latitude, MetUtilities.Taz, MetUtilities.Alpha, VP);
+
+            //do sanity check on weather
+            SensibilityCheck(clock as Clock, this);
         }
 
-        /// <summary>Method to read one days met data in from file</summary>
+        /// <summary>
+        /// Method to read one days met data in from file
+        /// </summary>
         /// <param name="date">the date to read met data</param>
-        private DailyMetDataFromFile GetMetData(DateTime date)
+        public DailyMetDataFromFile GetMetData(DateTime date)
         {
-            if (this.doSeek)
+            //check if we've looked at this date before
+            WeatherRecordEntry previousEntry = null;
+            foreach (WeatherRecordEntry entry in this.weatherCache)
             {
+                if (entry.Date.Equals(date))
+                {
+                    return entry.MetData;
+                }
+                else if (entry.Date < date)
+                {
+                    previousEntry = entry;
+                    break;
+                }
+            }
+
+            if (this.reader == null)
                 if (!this.OpenDataFile())
                     throw new ApsimXException(this, "Cannot find weather file '" + this.FileName + "'");
 
-                this.doSeek = false;
-                this.reader.SeekToDate(date);
-            }
-
-            object[] values;
-
+            //get weather for that date
             DailyMetDataFromFile readMetData = new DailyMetDataFromFile();
-
             try
             {
-                values = this.reader.GetNextLineOfData();
+                this.reader.SeekToDate(date);
+                readMetData.Raw = reader.GetNextLineOfData();
             }
             catch (IndexOutOfRangeException err)
             {
                 throw new Exception($"Unable to retrieve weather data on {date.ToString("yyy-MM-dd")} in file {FileName}", err);
             }
 
-            if (date != this.reader.GetDateFromValues(values))
-                throw new Exception("Non consecutive dates found in file: " + this.FileName + ".  Another posibility is that you have two clock objects in your simulation, there should only be one");
+            if (date != this.reader.GetDateFromValues(readMetData.Raw))
+                throw new Exception("Non consecutive dates found in file: " + this.FileName + ".");
+
+            //since this data was valid, store in our cache for next time
+
+            WeatherRecordEntry record = new WeatherRecordEntry();
+            record.Date = date;
+            record.MetData = readMetData;
+            if (previousEntry != null)
+                this.weatherCache.AddBefore(this.weatherCache.Find(previousEntry), record);
+            else
+                this.weatherCache.AddFirst(record);
+
+
+            return CheckDailyMetData(readMetData);
+        }
+
+        private DailyMetDataFromFile CheckDailyMetData(DailyMetDataFromFile readMetData)
+        {
 
             if (this.radiationIndex != -1)
-                readMetData.Radn = Convert.ToSingle(values[this.radiationIndex], CultureInfo.InvariantCulture);
+                readMetData.Radn = Convert.ToSingle(readMetData.Raw[this.radiationIndex], CultureInfo.InvariantCulture);
             else
                 readMetData.Radn = this.reader.ConstantAsDouble("radn");
 
             if (this.maximumTemperatureIndex != -1)
-                readMetData.MaxT = Convert.ToSingle(values[this.maximumTemperatureIndex], CultureInfo.InvariantCulture);
+                readMetData.MaxT = Convert.ToSingle(readMetData.Raw[this.maximumTemperatureIndex], CultureInfo.InvariantCulture);
             else
                 readMetData.MaxT = this.reader.ConstantAsDouble("maxt");
 
             if (this.minimumTemperatureIndex != -1)
-                readMetData.MinT = Convert.ToSingle(values[this.minimumTemperatureIndex], CultureInfo.InvariantCulture);
+                readMetData.MinT = Convert.ToSingle(readMetData.Raw[this.minimumTemperatureIndex], CultureInfo.InvariantCulture);
             else
                 readMetData.MinT = this.reader.ConstantAsDouble("mint");
 
             if (this.rainIndex != -1)
-                readMetData.Rain = Convert.ToSingle(values[this.rainIndex], CultureInfo.InvariantCulture);
+                readMetData.Rain = Convert.ToSingle(readMetData.Raw[this.rainIndex], CultureInfo.InvariantCulture);
             else
                 readMetData.Rain = this.reader.ConstantAsDouble("rain");
 
             if (this.evaporationIndex == -1)
                 readMetData.PanEvap = double.NaN;
             else
-                readMetData.PanEvap = Convert.ToSingle(values[this.evaporationIndex], CultureInfo.InvariantCulture);
+                readMetData.PanEvap = Convert.ToSingle(readMetData.Raw[this.evaporationIndex], CultureInfo.InvariantCulture);
 
             if (this.rainfallHoursIndex == -1)
                 readMetData.RainfallHours = double.NaN;
             else
-                readMetData.RainfallHours = Convert.ToSingle(values[this.rainfallHoursIndex], CultureInfo.InvariantCulture);
+                readMetData.RainfallHours = Convert.ToSingle(readMetData.Raw[this.rainfallHoursIndex], CultureInfo.InvariantCulture);
 
             if (this.vapourPressureIndex == -1)
                 readMetData.VP = Math.Max(0, MetUtilities.svp(readMetData.MinT));
             else
-                readMetData.VP = Convert.ToSingle(values[this.vapourPressureIndex], CultureInfo.InvariantCulture);
+                readMetData.VP = Convert.ToSingle(readMetData.Raw[this.vapourPressureIndex], CultureInfo.InvariantCulture);
 
             if (this.windIndex == -1)
                 readMetData.Wind = 3.0;
             else
-                readMetData.Wind = Convert.ToSingle(values[this.windIndex], CultureInfo.InvariantCulture);
+                readMetData.Wind = Convert.ToSingle(readMetData.Raw[this.windIndex], CultureInfo.InvariantCulture);
 
-            if (co2Index != -1)
-                readMetData.CO2 = Convert.ToDouble(values[co2Index], CultureInfo.InvariantCulture);
+            if (co2Index == -1)
+                readMetData.CO2 = 350;
+            else
+                readMetData.CO2 = Convert.ToDouble(readMetData.Raw[co2Index], CultureInfo.InvariantCulture);
 
             if (this.DiffuseFractionIndex == -1)
             {
@@ -776,7 +860,7 @@
                 if (Tt > 0.5 && readMetData.DiffuseFraction < 0.1) readMetData.DiffuseFraction = 0.1;
             }
             else
-                readMetData.DiffuseFraction = Convert.ToSingle(values[this.DiffuseFractionIndex], CultureInfo.InvariantCulture);
+                readMetData.DiffuseFraction = Convert.ToSingle(readMetData.Raw[this.DiffuseFractionIndex], CultureInfo.InvariantCulture);
 
             if (this.dayLengthIndex == -1)  // Daylength is not a column - check for a constant
             {
@@ -786,7 +870,7 @@
                     readMetData.DayLength = -1;
             }
             else
-                readMetData.DayLength = Convert.ToSingle(values[this.dayLengthIndex], CultureInfo.InvariantCulture);
+                readMetData.DayLength = Convert.ToSingle(readMetData.Raw[this.dayLengthIndex], CultureInfo.InvariantCulture);
 
             return readMetData;
         }
@@ -799,16 +883,16 @@
         [EventSubscribe("StartOfDay")]
         private void OnStartOfDay(object sender, EventArgs e)
         {
-            if (StartOfSummer != null && DateUtilities.DatesEqual(FirstDateOfSummer, clock.Today))
+            if (StartOfSummer != null && DateUtilities.DayMonthIsEqual(FirstDateOfSummer, clock.Today))
                 StartOfSummer.Invoke(this, e);
 
-            if (StartOfAutumn != null && DateUtilities.DatesEqual(FirstDateOfAutumn, clock.Today))
+            if (StartOfAutumn != null && DateUtilities.DayMonthIsEqual(FirstDateOfAutumn, clock.Today))
                 StartOfAutumn.Invoke(this, e);
 
-            if (StartOfWinter != null && DateUtilities.DatesEqual(FirstDateOfWinter, clock.Today))
+            if (StartOfWinter != null && DateUtilities.DayMonthIsEqual(FirstDateOfWinter, clock.Today))
                 StartOfWinter.Invoke(this, e);
 
-            if (StartOfSpring != null && DateUtilities.DatesEqual(FirstDateOfSpring, clock.Today))
+            if (StartOfSpring != null && DateUtilities.DayMonthIsEqual(FirstDateOfSpring, clock.Today))
                 StartOfSpring.Invoke(this, e);
         }
 
@@ -820,16 +904,16 @@
         [EventSubscribe("EndOfDay")]
         private void OnEndOfDay(object sender, EventArgs e)
         {
-            if (EndOfSummer != null && DateUtilities.DatesEqual(FirstDateOfAutumn, clock.Today.AddDays(1)))
+            if (EndOfSummer != null && DateUtilities.DayMonthIsEqual(FirstDateOfAutumn, clock.Today.AddDays(1)))
                 EndOfSummer.Invoke(this, e);
 
-            if (EndOfAutumn != null && DateUtilities.DatesEqual(FirstDateOfWinter, clock.Today.AddDays(1)))
+            if (EndOfAutumn != null && DateUtilities.DayMonthIsEqual(FirstDateOfWinter, clock.Today.AddDays(1)))
                 EndOfAutumn.Invoke(this, e);
 
-            if (EndOfWinter != null && DateUtilities.DatesEqual(FirstDateOfSpring, clock.Today.AddDays(1)))
+            if (EndOfWinter != null && DateUtilities.DayMonthIsEqual(FirstDateOfSpring, clock.Today.AddDays(1)))
                 EndOfWinter.Invoke(this, e);
 
-            if (EndOfSpring != null && DateUtilities.DatesEqual(FirstDateOfSummer, clock.Today.AddDays(1)))
+            if (EndOfSpring != null && DateUtilities.DayMonthIsEqual(FirstDateOfSummer, clock.Today.AddDays(1)))
                 EndOfSpring.Invoke(this, e);
         }
 
@@ -872,7 +956,7 @@
                     this.windIndex = StringUtilities.IndexOfCaseInsensitive(this.reader.Headings, "Wind");
                     this.DiffuseFractionIndex = StringUtilities.IndexOfCaseInsensitive(this.reader.Headings, "DifFr");
                     this.dayLengthIndex = StringUtilities.IndexOfCaseInsensitive(this.reader.Headings, "DayLength");
-                    co2Index = StringUtilities.IndexOfCaseInsensitive(reader.Headings, "CO2");
+                    this.co2Index = StringUtilities.IndexOfCaseInsensitive(reader.Headings, "CO2");
 
                     if (!string.IsNullOrEmpty(ConstantsFile))
                     {
@@ -901,7 +985,7 @@
                 }
                 else
                 {
-                    if (this.reader.IsExcelFile != true) 
+                    if (this.reader.IsExcelFile != true)
                         this.reader.SeekToDate(this.reader.FirstDate);
                 }
 
@@ -922,6 +1006,18 @@
         }
 
         /// <summary>
+        /// Read a user-defined value from today's weather data.
+        /// </summary>
+        /// <param name="columnName">Name of the column.</param>
+        public double GetValue(string columnName)
+        {
+            int columnIndex = StringUtilities.IndexOfCaseInsensitive(reader.Headings, columnName);
+            if (columnIndex == -1)
+                throw new InvalidOperationException($"Column {columnName} does not exist in {FileName}");
+            return Convert.ToDouble(TodaysMetData.Raw[columnIndex], CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
         /// Calculate the amp and tav 'constant' values for this weather file
         /// and store the values into the File constants.
         /// </summary>
@@ -937,7 +1033,7 @@
                 this.reader.AddConstant("tav", tav.ToString(CultureInfo.InvariantCulture), string.Empty, string.Empty); // add a new constant
             else
                 this.reader.SetConstant("tav", tav.ToString(CultureInfo.InvariantCulture));
- 
+
             if (this.reader.Constant("amp") == null)
                 this.reader.AddConstant("amp", amp.ToString(CultureInfo.InvariantCulture), string.Empty, string.Empty); // add a new constant
             else
@@ -951,7 +1047,7 @@
         /// <param name="amp">The calculated amp value</param>
         private void ProcessMonthlyTAVAMP(out double tav, out double amp)
         {
-            int savedPosition = reader.GetCurrentPosition();
+            long savedPosition = reader.GetCurrentPosition();
 
             // init return values
             tav = 0;
@@ -961,7 +1057,15 @@
             // get dataset size
             DateTime start = this.reader.FirstDate;
             DateTime last = this.reader.LastDate;
+
             int nyears = last.Year - start.Year + 1;
+
+            DateTime endDate = new DateTime(last.Year, start.Month, start.Day); //get same day of year as start date
+            if (endDate > last)
+                endDate = new DateTime(last.Year-1, start.Month, start.Day);
+
+            if ((endDate - start).TotalDays < 730)
+                throw new Exception("Tav and Amp cannot be calculated from less than two years of met data.");
 
             // temp storage arrays
             double[,] monthlyMeans = new double[12, nyears];
@@ -994,7 +1098,7 @@
                 monthlySums[curMonth - 1, yearIndex] = monthlySums[curMonth - 1, yearIndex] + ((maxt + mint) * 0.5);
                 monthlyDays[curMonth - 1, yearIndex]++;
 
-                if (curDate >= last)
+                if (curDate >= endDate)
                     moreData = false;
             }
 
@@ -1005,8 +1109,8 @@
             double yearlySumAmp = 0;
             for (int y = 0; y < nyears; y++)
             {
-                maxMean = -999;
-                minMean = 999;
+                maxMean = double.MinValue;
+                minMean = double.MaxValue;
                 sumOfMeans = 0;
                 for (int m = 0; m < 12; m++)
                 {
@@ -1019,14 +1123,73 @@
                     }
                 }
 
-                yearlySumMeans += sumOfMeans / 12.0;        // accum the ave of monthly means
-                yearlySumAmp += maxMean - minMean;          // accum the amp of means
+                if (maxMean != double.MinValue && minMean != double.MaxValue)
+                {
+                    yearlySumMeans += sumOfMeans / 12.0;        // accum the ave of monthly means
+                    yearlySumAmp += maxMean - minMean;          // accum the amp of means
+                }
             }
 
             tav = yearlySumMeans / nyears;  // calc the ave of the yearly ave means
             amp = yearlySumAmp / nyears;    // calc the ave of the yearly amps
 
             reader.SeekToPosition(savedPosition);
+        }
+
+        /// <summary>
+        /// Does a santiy check on this weather data to check that temperatures,
+        /// VP, radition and rain are potentially valid numbers.
+        /// Also checks that every day has weather.
+        /// </summary>
+        /// <param name="clock">The clock</param>
+        /// <param name="weatherToday">The weather</param>
+        private void SensibilityCheck(Clock clock, Weather weatherToday)
+        {
+            //things to check:
+            //Mint > MaxtT
+            //VP(if present) <= 0
+            //Radn < 0 or Radn > 40
+            //Rain < 0
+            if (weatherToday.MinT > weatherToday.MaxT)
+            {
+                summary.WriteMessage(weatherToday, "Error: Weather on " + clock.Today.ToString() + " has higher minimum temperature (" + weatherToday.MinT + ") than maximum (" + weatherToday.MaxT + ")", MessageType.Warning);
+            }
+            if (weatherToday.VP <= 0)
+            {
+                summary.WriteMessage(weatherToday, "Error: Weather on " + clock.Today.ToString() + " has Vapor Pressure (" + weatherToday.VP + ") which is below 0", MessageType.Warning);
+            }
+            if (weatherToday.Radn < 0)
+            {
+                summary.WriteMessage(weatherToday, "Error: Weather on " + clock.Today.ToString() + " has negative solar raditation (" + weatherToday.Radn + ")", MessageType.Warning);
+            }
+            if (weatherToday.Radn > 40)
+            {
+                summary.WriteMessage(weatherToday, "Error: Weather on " + clock.Today.ToString() + " has solar raditation (" + weatherToday.Radn + ") which is above 40", MessageType.Warning);
+            }
+            if (weatherToday.Rain < 0)
+            {
+                summary.WriteMessage(weatherToday, "Error: Weather on " + clock.Today.ToString() + " has negative ranfaill (" + weatherToday.Radn + ")", MessageType.Warning);
+            }
+            return;
+        }
+
+        /// <summary>
+        /// Returns an adjacent day's weather data as defined by the offset.
+        /// Will return today's data if yesterday is not a valid entry in the weather file.
+        /// </summary>
+        /// <param name="offset">The number of days away from today</param>
+        private DailyMetDataFromFile GetAdjacentMetData(int offset)
+        {
+            if ((this.clock.Today.Equals(this.reader.FirstDate) && offset < 0) ||
+                this.clock.Today.Equals(this.reader.LastDate) && offset > 0)
+            {
+                //in the case that we try to get yesterdays/tomorrows weather and today is the same as the start or end of the weather file
+                //we should instead return today's weather
+                summary.WriteMessage(this, "Warning: Weather on " + this.clock.Today.AddDays(offset).ToString("d") + " does not exist. Today's weather on " + this.clock.Today.ToString("d") + " was used instead.", MessageType.Warning);
+                return GetMetData(this.clock.Today);
+            }
+            else
+                return GetMetData(this.clock.Today.AddDays(offset));
         }
     }
 }

@@ -1,10 +1,8 @@
-﻿using Models.Core;
-using Models.Interfaces;
-using Models.PMF.Interfaces;
-using Newtonsoft.Json;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.Data;
+using Models.Core;
+using Models.Functions;
+using Models.PMF.Interfaces;
 
 namespace Models.ForageDigestibility
 {
@@ -17,30 +15,30 @@ namespace Models.ForageDigestibility
     [Serializable]
     [ValidParent(ParentType = typeof(Zone))]
     [ValidParent(ParentType = typeof(Simulation))]
-    [ViewName("UserInterface.Views.DualGridView")]
-    [PresenterName("UserInterface.Presenters.TablePresenter")]
+    [ViewName("UserInterface.Views.PropertyAndGridView")]
+    [PresenterName("UserInterface.Presenters.PropertyAndGridPresenter")]
 
-    public class Forages : Model, IModelAsTable
+    public class Forages : Model
     {
+        private List<ForageMaterialParameters> _parameters = null;
         private List<ModelWithDigestibleBiomass> forageModels = null;
+        private Dictionary<string, ExpressionFunction> digestibilityFunctions = new();
 
         /// <summary>Forage parameters for all models and all organs.</summary>
-        public List<ForageMaterialParameters> Parameters { get; set; }
-
-        /// <summary>Gets or sets the table of values.</summary>
-        [JsonIgnore]
-        public List<DataTable> Tables
+        [Display]
+        public List<ForageMaterialParameters> Parameters
         {
             get
             {
-                return new List<DataTable>() { GetParametersAsGrid() };
+                if (_parameters == null)
+                    CreateParametersUsingDefaults();
+                return _parameters;
             }
             set
             {
-                SetParametersFromGrid(value[0]);
+                _parameters = value;
             }
         }
-
 
         /// <summary>Return a collection of models that have digestible biomasses.</summary>
         public IEnumerable<ModelWithDigestibleBiomass> ModelsWithDigestibleBiomass
@@ -49,119 +47,137 @@ namespace Models.ForageDigestibility
             {
                 if (forageModels == null)
                 {
-                    // Need to initialise the parameters. When they are deserialised from file
-                    // they haven't been initialised.
-                    if (Parameters == null)
-                        SetParametersFromGrid(GetParametersAsGrid()); // Setup with defaults.
-
-                    foreach (var param in Parameters)
-                        param.Initialise(this);
+                    // Need to create default parameters if none have been deserialised from file.
+                    if (_parameters == null)
+                        CreateParametersUsingDefaults();
 
                     forageModels = new List<ModelWithDigestibleBiomass>();
                     foreach (var forage in FindAllInScope<IHasDamageableBiomass>())
-                        forageModels.Add(new ModelWithDigestibleBiomass(forage, Parameters));
+                        forageModels.Add(new ModelWithDigestibleBiomass(this, forage, Parameters));
                 }
                 return forageModels;
             }
         }
 
-        /// <summary>Return a table of all parameters.</summary>
-        private DataTable GetParametersAsGrid()
+        /// <summary>
+        /// Get fraction consumable for biomass.
+        /// </summary>
+        /// <param name="damageableBiomass">Damageable material.</param>
+        public double GetFractionConsumable(DamageableBiomass damageableBiomass)
         {
-            var data = new DataTable();
-            data.Columns.Add("Name");
-            data.Columns.Add("Live digestibility");
-            data.Columns.Add("Dead digestibility");
-            data.Columns.Add("Live fraction consumbable");
-            data.Columns.Add("Dead fraction consumbable");
-            data.Columns.Add("Live minimum biomass (kg/ha)");
+            var param = Parameters.Find(p => p.Name == damageableBiomass.Name) ?? throw new Exception($"Cannot find forage parameters for {damageableBiomass.Name}");
+            if (damageableBiomass.IsLive)
+                return param.LiveFractionConsumable;
+            else
+                return param.DeadFractionConsumable;
+        }
 
+         /// <summary>
+        /// Get minimum consumable biomass for biomass.
+        /// </summary>
+        /// <param name="damageableBiomass">Damageable material.</param>
+        public double GetMinimumConsumable(DamageableBiomass damageableBiomass)
+        {
+            var param = Parameters.Find(p => p.Name == damageableBiomass.Name) ?? throw new Exception($"Cannot find forage parameters for {damageableBiomass.Name}");
+            if (damageableBiomass.IsLive)
+                return param.LiveMinimumBiomass;
+            else
+                return param.DeadMinimumBiomass;
+        }
+
+        /// <summary>
+        /// Get digestibility for biomass.
+        /// </summary>
+        /// <param name="damageableBiomass">Damageable material.</param>
+        public double GetDigestibility(DamageableBiomass damageableBiomass)
+        {
+            var param = Parameters.Find(p => p.Name == damageableBiomass.Name) ?? throw new Exception($"Cannot find forage parameters for {damageableBiomass.Name}");
+
+            string digestibilityString;
+            if (damageableBiomass.IsLive)
+                digestibilityString = param.LiveDigestibility;
+            else
+                digestibilityString = param.DeadDigestibility;
+
+            if (digestibilityString == "FromModel")
+            {
+                if (damageableBiomass.DigestibilityFromModel == null)
+                    throw new Exception($"You have chosen to use the digestibility from {damageableBiomass.Name} model but the model does not calculate digestibility");
+                return (double)damageableBiomass.DigestibilityFromModel;
+            }
+            else if (double.TryParse(digestibilityString, out double digestibility))
+                return digestibility;
+            else
+            {
+                // assume expression function.
+                if (!digestibilityFunctions.TryGetValue(digestibilityString, out ExpressionFunction expression))
+                {
+                    expression = new ExpressionFunction() { Parent = this, Expression = digestibilityString };
+                    digestibilityFunctions.Add(digestibilityString, expression);
+                }
+                return expression.Value();
+            }
+        }
+
+        /// <summary>Create parameters using default values.</summary>
+        private void CreateParametersUsingDefaults()
+        {
             var materialNames = new List<string>();
             foreach (var forage in FindAllInScope<IHasDamageableBiomass>())
             {
                 foreach (var material in forage.Material)
                 {
-                    var fullName = $"{forage.Name}.{material.Name}";
-                    if (!materialNames.Contains(fullName))
+                    if (!materialNames.Contains(material.Name))
                     {
-                        DataRow row = GetForageParametersAsRow(data, forage.Name, material.Name);
-                        data.Rows.Add(row);
-                        materialNames.Add(fullName);
+                        string liveDigestibility = "0.7";
+                        string deadDigestibility = "0.3";
+                        if (material.Name.StartsWith("AGP"))
+                        {
+                            liveDigestibility = "FromModel";
+                            deadDigestibility = "FromModel";
+                        }
+
+                        if (_parameters == null)
+                            _parameters = new();
+                        Parameters.Add(new ForageMaterialParameters()
+                        {
+                            Name = material.Name,
+                            LiveDigestibility = liveDigestibility,
+                            DeadDigestibility = deadDigestibility,
+                            LiveFractionConsumable = 1,
+                            DeadFractionConsumable = 1,
+                            LiveMinimumBiomass = 100
+                        });
+                        materialNames.Add(material.Name);
                     }
                 }
             }
-            if (Parameters == null)
-                SetParametersFromGrid(data);
-
-            return data;
         }
 
-        /// <summary>
-        /// Get, as a DataRow, forage parameters for a model and organ.
-        /// </summary>
-        /// <param name="data">The DataTable the row is to belong to.</param>
-        /// <param name="modelName">The name of the model.</param>
-        /// <param name="organName">The name of the organ.</param>
-        /// <returns></returns>
-        private DataRow GetForageParametersAsRow(DataTable data, string modelName, string organName)
+        /// <summary>Encapsulates an amount of material removed from a plant.</summary>
+        public class MaterialRemoved
         {
-            var fullName = $"{ modelName}.{ organName}";
-
-            var row = data.NewRow();
-            row[0] = fullName;
-            row[1] = 0.7;
-            row[2] = 0.3;
-            row[3] = 1;
-            row[4] = 1;
-            row[5] = 100;
-            if (organName == "Root")
+            /// <summary>
+            /// Constructor
+            /// </summary>
+            /// <param name="wt">Mass of biomass removed (kg/ha).</param>
+            /// <param name="n">Mass of nitrogen removed (kg/ha).</param>
+            /// <param name="digestibility">Digestibility of material removed.</param>
+            public MaterialRemoved(double wt, double n, double digestibility)
             {
-                row[1] = 0.0;
-                row[2] = 0.0;
-                row[3] = 0;
-                row[4] = 0;
-                row[5] = 0;
-            }
-            var live = Parameters?.Find(p => p.Name.Equals(fullName, StringComparison.InvariantCultureIgnoreCase)
-                                             && p.IsLive);
-            if (live != null)
-            {
-                row[1] = live.DigestibilityString;
-                row[3] = live.FractionConsumable;
-                row[5] = live.MinimumAmount;
-
-                var dead = Parameters?.Find(p => p.Name.Equals(fullName, StringComparison.InvariantCultureIgnoreCase)
-                                                 && !p.IsLive);
-                if (dead != null)
-                {
-                    row[2] = dead.DigestibilityString;
-                    row[4] = dead.FractionConsumable;
-                }
+                Wt = wt;
+                N = n;
+                Digestibility = digestibility;
             }
 
-            return row;
-        }
+            /// <summary>Mass of biomass removed (kg/ha)</summary>
+            public double Wt { get; }
 
-        /// <summary>
-        /// Set the parameters property from a data table.
-        /// </summary>
-        /// <param name="data">The data table.</param>
-        private void SetParametersFromGrid(DataTable data)
-        {
-            Parameters = new List<ForageMaterialParameters>();
-            foreach (DataRow row in data.Rows)
-            {
-                var fullName = row[0].ToString();
-                if (!string.IsNullOrEmpty(fullName)) // can be empty at bottom of grid because grid.CanGrow=true
-                {
-                    Parameters?.RemoveAll(p => p.Name.Equals(fullName, StringComparison.InvariantCultureIgnoreCase));
-                    var live = new ForageMaterialParameters(this, fullName, live: true, row[1].ToString(), Convert.ToDouble(row[3]), Convert.ToDouble(row[5]));
-                    Parameters.Add(live);
+            /// <summary>Mass of nitrogen removed (kg/ha)</summary>
+            public double N { get; }
 
-                    var dead = new ForageMaterialParameters(this, fullName, live: false, row[2].ToString(), Convert.ToDouble(row[4]), 0.0);
-                    Parameters.Add(dead);
-                }
-            }
+            /// <summary>Digestibility of material removed.</summary>
+            public double Digestibility { get; }
         }
     }
 }

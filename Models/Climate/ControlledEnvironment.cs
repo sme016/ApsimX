@@ -1,11 +1,12 @@
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Interfaces;
+using Newtonsoft.Json;
+using System;
+
 namespace Models.Climate
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Interfaces;
-    using Newtonsoft.Json;
-    using System;
-    using System.Diagnostics.CodeAnalysis;
 
     ///<summary>
     /// Reads in controlled environment weather data and makes it available to models.
@@ -13,14 +14,18 @@ namespace Models.Climate
     [Serializable]
     [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
-    [ValidParent(ParentType=typeof(Simulation))]
+    [ValidParent(ParentType = typeof(Simulation))]
     public class ControlledEnvironment : Model, IWeather
     {
         /// <summary>
         /// A link to the clock model.
         /// </summary>
         [Link]
-        private Clock clock = null;
+        private IClock clock = null;
+
+        /// <summary>Array to store default hourly values.</summary>
+        private double[] _defaultSubdailyValues = new double[24];
+
         /// <summary>
         /// Gets the start date of the weather file
         /// </summary>
@@ -29,7 +34,7 @@ namespace Models.Climate
         /// <summary>
         /// Gets the end date of the weather file
         /// </summary>
-        public DateTime EndDate { get { return clock.EndDate;}}
+        public DateTime EndDate { get { return clock.EndDate; } }
 
         /// <summary>
         /// This event will be invoked immediately before models get their weather data.
@@ -57,7 +62,15 @@ namespace Models.Climate
         /// </summary>
         [Units("°C")]
         [JsonIgnore]
-        public double MeanT { get { return (MaxT + MinT) / 2; } }
+        public double MeanT { get { return MathUtilities.Average(SubDailyTemperature); } }
+
+        /// <summary>Optionally providable subdaily temperature values.</summary>
+        [Description("Subdaily temperature values (if unset, will be assumed tmax for light hours and tmin for dark hours).")]
+        public double[] ProvidedSubdailyValues { get; set; }
+
+        /// <summary>Subdaily temperature values.</summary>
+        [JsonIgnore]
+        public double[] SubDailyTemperature => SubdailyValuesWereGiven ? ProvidedSubdailyValues : _defaultSubdailyValues;
 
         /// <summary>
         /// Daily mean VPD (hPa)
@@ -92,7 +105,7 @@ namespace Models.Climate
         [Description("Solar Radiation")]
         [Units("MJ/m2/d")]
         public double Radn { get; set; }
-		
+
         /// <summary>
         /// Gets or sets the Pan Evaporation (mm) (Class A pan)
         /// </summary>
@@ -140,7 +153,7 @@ namespace Models.Climate
         /// </summary>
         [Description("Latitude")]
         [Units("°")]
-        public double Latitude{ get; set; }
+        public double Latitude { get; set; }
 
         /// <summary>Gets the longitude</summary>
         [Description("Longitude")]
@@ -150,12 +163,12 @@ namespace Models.Climate
         /// <summary>
         /// Gets the average temperature
         /// </summary>
-        public double Tav { get { return (this.MinT + this.MaxT)/2; }}
+        public double Tav { get { return (this.MinT + this.MaxT) / 2; } }
 
         /// <summary>
         /// Gets the temperature amplitude.
         /// </summary>
-        public double Amp { get {return 0;}}
+        public double Amp { get { return 0; } }
 
         /// <summary>
         /// Gets the temperature amplitude.
@@ -167,7 +180,7 @@ namespace Models.Climate
         /// </summary>
         [Description("Day Length")]
         [Units("h")]
-        public double DayLength {get; set;}
+        public double DayLength { get; set; }
 
         /// <summary>
         /// Calculate daylength using a given twilight angle
@@ -187,6 +200,16 @@ namespace Models.Climate
         public double SunRise { get; set; }
 
         /// <summary>
+        /// Number of hours after sun up we switch from Min to Max temp.
+        /// </summary>
+        [Description("Hours after sunrise to switch from Min to Max temp")]
+
+        public double TempLag { get; set; } = 0;
+
+        /// <summary>Whether or not the this has been provided with subdaily values.</summary>
+        private bool SubdailyValuesWereGiven => ProvidedSubdailyValues != null && ProvidedSubdailyValues.Length > 0;
+
+        /// <summary>
         /// Calculate daylength using a given twilight angle
         /// </summary>
         public double CalculateSunRise()
@@ -197,8 +220,8 @@ namespace Models.Climate
         /// <summary>
         /// Gets the duration of the day in hours.
         /// </summary>
-        [Description("The hour of the day for sunset")]
-        public double SunSet { get; set; }
+        [JsonIgnore]
+        public double SunSet { get { return SunRise + DayLength; }}
 
         /// <summary>
         /// Calculate daylength using a given twilight angle
@@ -226,11 +249,22 @@ namespace Models.Climate
             if (this.PreparingNewWeatherData != null)
                 this.PreparingNewWeatherData.Invoke(this, new EventArgs());
             YesterdaysMetData = new DailyMetDataFromFile();
+            if (!SubdailyValuesWereGiven)
+            {
+                for (int i = 0; i < _defaultSubdailyValues.Length; i++)
+                {
+                    if ((i <= SunRise+TempLag) || (i > SunSet))
+                        _defaultSubdailyValues[i] = MinT;
+                    else
+                        _defaultSubdailyValues[i] = MaxT;
+                }
+            }
             YesterdaysMetData.Radn = Radn;
             YesterdaysMetData.Rain = Rain;
             YesterdaysMetData.MaxT = MaxT;
             YesterdaysMetData.MinT = MinT;
             YesterdaysMetData.VP = VP;
+            YesterdaysMetData.PanEvap = PanEvap;
             TomorrowsMetData = YesterdaysMetData;
         }
 

@@ -1,8 +1,6 @@
-﻿using APSIM.Shared.Documentation;
+﻿using System;
 using Models.Core;
 using Models.PMF.Interfaces;
-using System;
-using System.Collections.Generic;
 
 namespace Models.Functions.DemandFunctions
 {
@@ -18,24 +16,18 @@ namespace Models.Functions.DemandFunctions
         [Link]
         IArbitrator arbitrator = null;
 
+        [Link(Type = LinkType.Ancestor)]
+        IOrgan parentOrgan = null;
+
         /// <summary>Gets the value.</summary>
         public double Value(int arrayIndex = -1)
         {
-            if (arbitrator.DM != null)
-                return arbitrator.DM.TotalFixationSupply * PartitionFraction.Value(arrayIndex);
+            if (PartitionFraction.Value(arrayIndex) < 0)
+                throw new Exception("PartitionFraction in " + this.parentOrgan.Name + " is returning a negative value");
+            if (arbitrator != null)
+                return arbitrator.TotalDMFixationSupply * PartitionFraction.Value(arrayIndex);
             else
                 return 0;
-        }
-
-        /// <summary>Document the model.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // Write description of this class from summary and remarks XML documentation.
-            foreach (var tag in GetModelDescription())
-                yield return tag;
-            yield return new Paragraph($"*{Name} = PartitionFraction x [Arbitrator].DM.TotalFixationSupply*");
-            foreach (var tag in DocumentChildren<IModel>())
-                yield return tag;
         }
     }
 }

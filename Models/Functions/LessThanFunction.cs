@@ -1,10 +1,7 @@
 ﻿using System;
-using APSIM.Shared.Documentation;
 using System.Collections.Generic;
-using System.Text;
-using System.Reflection;
-using Models.Core;
 using System.Linq;
+using Models.Core;
 
 namespace Models.Functions
 {
@@ -45,41 +42,6 @@ namespace Models.Functions
                 return IfTrue;
             else
                 return IfFalse;
-        }
-
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            if (ChildFunctions == null)
-                ChildFunctions = FindAllChildren<IFunction>().ToList();
-
-            if (ChildFunctions == null || ChildFunctions.Count < 1)
-                yield break;
-
-            string lhs;
-            if (ChildFunctions[0] is VariableReference)
-                lhs = (ChildFunctions[0] as VariableReference).VariableName;
-            else if (ChildFunctions[0] is IModel model)
-                lhs = model.Name;
-            else
-                throw new Exception($"Unknown model type '{ChildFunctions[0].GetType().Name}'");
-
-            string rhs;
-            if (ChildFunctions[1] is VariableReference)
-                rhs = (ChildFunctions[1] as VariableReference).VariableName;
-            else if (ChildFunctions[1] is IModel model)
-                rhs = model.Name;
-            else
-                throw new Exception($"Unknown model type '{ChildFunctions[1].GetType().Name}'");
-
-            yield return new Paragraph($"IF {lhs} < {rhs} THEN");
-            foreach (ITag tag in ChildFunctions[2].Document())
-                yield return tag;
-            yield return new Paragraph("ELSE");
-            foreach (ITag tag in ChildFunctions[3].Document())
-                yield return tag;
         }
     }
 }

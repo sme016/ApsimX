@@ -1,5 +1,4 @@
 using APSIM.Shared.Utilities;
-using Models;
 using Models.Core;
 using System;
 using System.Collections;
@@ -45,6 +44,11 @@ namespace UserInterface.Presenters
         private Dictionary<Guid, PropertyObjectPair> propertyMap = new Dictionary<Guid, PropertyObjectPair>();
 
         /// <summary>
+        /// Called when the view is refreshed
+        /// </summary>
+        public event EventHandler ViewRefreshed;
+
+        /// <summary>
         /// Attach the model to the view.
         /// </summary>
         /// <param name="model">The model.</param>
@@ -78,8 +82,21 @@ namespace UserInterface.Presenters
         {
             if (model != null)
             {
+                view.PropertyChanged -= OnViewChanged;
+                presenter.CommandHistory.ModelChanged -= OnModelChanged;
+
+                this.view.SaveChanges();
+
+                if (GetAllEditorViews().Count > 0)
+                    this.view.DeleteEditorViews();
+
                 this.model = model;
                 view.DisplayProperties(GetProperties(this.model));
+
+                view.PropertyChanged += OnViewChanged;
+                presenter.CommandHistory.ModelChanged += OnModelChanged;
+
+                ViewRefreshed?.Invoke(this, new EventArgs());
             }
         }
 
@@ -95,7 +112,7 @@ namespace UserInterface.Presenters
                     // Only show properties which have a getter and a setter.
                     .Where(p => p.CanRead && p.CanWrite)
                     // Order by line number of the description attribute.
-                    .OrderBy(p => p.GetCustomAttribute<DisplayAttribute>()?.Order)
+                    .OrderBy(p => p.GetCustomAttribute<DisplayAttribute>()?.Order??0)
                     // Then order by line number of the description attribute.
                     .ThenBy(p => p.GetCustomAttribute<DescriptionAttribute>().LineNumber);
 
@@ -117,12 +134,34 @@ namespace UserInterface.Presenters
                         subObject = Activator.CreateInstance(property.PropertyType);
                     PropertyGroup group = GetProperties(subObject);
                     group.Name = property.GetCustomAttribute<DescriptionAttribute>()?.ToString() ?? property.Name;
+                    string units = property.GetCustomAttribute<UnitsAttribute>()?.ToString();
+                    if (!string.IsNullOrEmpty(units))
+                    {
+                        units = "(" + units + ")";
+                        if (!group.Name.Contains(units))
+                            group.Name += " " + units;
+                    }
                     subModelProperties.Add(group);
                 }
                 else
                 {
-                    Property result = new Property(obj, property);
-                    propertyMap.Add(result.ID, new PropertyObjectPair() { Model = obj, Property = property });
+                    // determine where to link to the property or use a substitute sub-property for a class-based property.
+                    Property result;
+                    string subPropertyName = property.GetCustomAttribute<DisplayAttribute>()?.SubstituteSubPropertyName ?? "";
+                    if (subPropertyName.Any())
+                    {
+                        object subObject = property.GetValue(obj);
+                        subObject ??= Activator.CreateInstance(property.PropertyType);
+                        PropertyInfo subProperty = GetAllProperties(subObject).Where(a => a.Name == subPropertyName).FirstOrDefault();
+
+                        result = new Property(subObject, subProperty);
+                        propertyMap.Add(result.ID, new PropertyObjectPair() { Model = subObject, Property = subProperty });
+                    }
+                    else
+                    {
+                        result = new Property(obj, property);
+                        propertyMap.Add(result.ID, new PropertyObjectPair() { Model = obj, Property = property });
+                    }
                     properties.Add(result);
                 }
             }
@@ -147,9 +186,19 @@ namespace UserInterface.Presenters
         {
             view.SaveChanges();
             view.PropertyChanged -= OnViewChanged;
+            (view as ViewBase).Dispose();
             presenter.CommandHistory.ModelChanged -= OnModelChanged;
         }
-    
+
+        /// <summary>
+        /// Returns a list of all code editor views that have been created.
+        /// Used by the presenter to connect up intellisense events.
+        /// </summary>
+        public List<EditorView> GetAllEditorViews()
+        {
+            return this.view.GetAllEditorViews();
+        }
+
         /// <summary>
         /// Called when a model is changed. Refreshes the view.
         /// </summary>

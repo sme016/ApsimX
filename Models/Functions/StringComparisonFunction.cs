@@ -1,8 +1,5 @@
 ﻿using System;
-using APSIM.Shared.Documentation;
-using System.Collections.Generic;
 using Models.Core;
-
 
 namespace Models.Functions
 {
@@ -30,14 +27,11 @@ namespace Models.Functions
         [Link(Type = LinkType.Child, ByName = true)]
         IFunction FalseValue = null;
 
-        [Link]
-        private ILocator locator = null;
-
         /// <summary>Gets the value.</summary>
         /// <value>The value.</value>
         public double Value(int arrayIndex = -1)
         {
-            object s = locator.Get(PropertyName);
+            object s = Locator.Get(PropertyName);
 
             string PropertyString;
             if (s == null)
@@ -55,20 +49,6 @@ namespace Models.Functions
                 return TrueValue.Value(arrayIndex);
             else
                 return FalseValue.Value(arrayIndex);
-        }
-
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            yield return new Paragraph($"If {PropertyName} = {StringValue} Then");
-            foreach (ITag tag in TrueValue.Document())
-                yield return tag;
-
-            yield return new Paragraph("Else");
-            foreach (ITag tag in FalseValue.Document())
-                yield return tag;
         }
     }
 }

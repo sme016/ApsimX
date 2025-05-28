@@ -1,11 +1,8 @@
 ﻿using System;
-using APSIM.Shared.Documentation;
 using System.Collections.Generic;
-using System.Text;
-using System.Reflection;
+using System.Linq;
 using Models.Core;
 using Models.PMF.Phen;
-using System.Linq;
 
 namespace Models.Functions
 {
@@ -17,10 +14,10 @@ namespace Models.Functions
     [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     public class AccumulateResetAtStage : Model, IFunction
-    {        
+    {
         /// Private class members
         /// -----------------------------------------------------------------------------------------------------------
-                   
+
         private double AccumulatedValue = 0;
 
         private IEnumerable<IFunction> ChildFunctions;
@@ -32,14 +29,14 @@ namespace Models.Functions
         [Description("(optional) Stage name to reset accumulation")]
         public string ResetStageName { get; set; }
 
-        
+
         /// <summary>Called when [simulation commencing].</summary>
         /// <param name="sender">The sender.</param>
         /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
         [EventSubscribe("Commencing")]
         private void OnSimulationCommencing(object sender, EventArgs e)
         {
-            AccumulatedValue = 0;          
+            AccumulatedValue = 0;
         }
 
         /// <summary>Called by Plant.cs when phenology routines are complete.</summary>
@@ -51,13 +48,13 @@ namespace Models.Functions
             if (ChildFunctions == null)
                 ChildFunctions = FindAllChildren<IFunction>().ToList();
 
-                double DailyIncrement = 0.0;
-                foreach (IFunction function in ChildFunctions)
-                {
-                    DailyIncrement += function.Value();
-                }
+            double DailyIncrement = 0.0;
+            foreach (IFunction function in ChildFunctions)
+            {
+                DailyIncrement += function.Value();
+            }
 
-                AccumulatedValue += DailyIncrement;           
+            AccumulatedValue += DailyIncrement;
         }
 
         /// <summary>Called when [phase changed].</summary>
@@ -84,14 +81,6 @@ namespace Models.Functions
         private void OnPlantEnding(object sender, EventArgs e)
         {
             AccumulatedValue = 0;
-        }
-
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            yield return new Paragraph($"**{Name}** is a daily accumulation of the values of functions listed below and set to zero each time the {ResetStageName} is passed.");
         }
     }
 }

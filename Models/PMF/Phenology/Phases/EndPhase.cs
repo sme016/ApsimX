@@ -1,10 +1,6 @@
 using System;
 using Models.Core;
 using Newtonsoft.Json;
-using System.IO;
-using Models.Functions;
-using APSIM.Shared.Documentation;
-using System.Collections.Generic;
 
 namespace Models.PMF.Phen
 {
@@ -27,6 +23,10 @@ namespace Models.PMF.Phen
         [Models.Core.Description("End")]
         public string End { get; set; }
 
+        /// <summary>Is the phase emerged from the ground?</summary>
+        [Description("Is the phase emerged?")]
+        public bool IsEmerged { get; set; } = true;
+
         /// <summary>Return a fraction of phase complete.</summary>
         [JsonIgnore]
         public double FractionComplete
@@ -48,16 +48,10 @@ namespace Models.PMF.Phen
         }
 
         /// <summary>Resets the phase.</summary>
-        public void ResetPhase()  { }
+        public void ResetPhase() { }
 
-        /// <summary>Writes documentation for this function by adding to the list of documentation tags.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            foreach (var tag in GetModelDescription())
-                yield return tag;
-        }
     }
 }
 
-      
-      
+
+

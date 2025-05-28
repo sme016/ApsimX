@@ -1,23 +1,19 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Text;
-using System.IO;
-using Models.Core;
-using Models;
-using Newtonsoft.Json;
-using Models.Interfaces;
-using APSIM.Shared.Utilities;
 using System.Linq;
-using Models.Soils.Standardiser;
-using Models.Soils.Nutrients;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Interfaces;
+using Newtonsoft.Json;
 
 namespace Models.Soils
 {
     ///<summary>
     /// .NET port of the Fortran SWIM3 model
     /// Ported by Eric Zurcher July 2014
-    ///</summary> 
+    ///</summary>
     [Serializable]
     [ViewName("UserInterface.Views.PropertyView")]   // Until we have a better view for SWIM...
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
@@ -25,17 +21,17 @@ namespace Models.Soils
     public class Swim3 : Model, ISoilWater
     {
         [Link]
-        private IClock Clock = null;
+        private IClock clock = null;
 
         [Link]
         private ISummary summary = null;
 
         /// <summary>Access the soil physical properties.</summary>
-        [Link] 
-        private IPhysical soilPhysical = null;
+        [Link]
+        private IPhysical physical = null;
 
         [Link]
-        private Sample initial = null;
+        private Water water = null;
 
         /// <summary>Link to NO3.</summary>
         [Link]
@@ -50,323 +46,15 @@ namespace Models.Soils
         [Link(IsOptional = true)]
         private SwimSubsurfaceDrain subsurfaceDrain = null;
 
-        [Link(IsOptional = true)]
-        private SwimWaterTable waterTable = null;
-
-        const double floatComparisonTolerance = 1e-16;
-        const double divideTolerance = 1e-8;
-        const double effpar = 0.184;
-        const double psi_ll15 = -15000.0;
-        const double psiad = -1e6;
-        const double psi0 = -0.6e7;
-
-        /// <summary> The amount of rainfall intercepted by crop and residue canopies </summary>
-        public double PrecipitationInterception { get; set; }
-
-        #region "Global" variables
-        double[] _swf;
-
-        //[Input(IsOptional = true)]
-        string rain_time = null;
-        //[Input(IsOptional = true)]
-        double rain_durn = Double.NaN;
-        //[Input(IsOptional = true)]
-        [Units("min")]
-        double rain_int = Double.NaN;
-
-        //[Input(IsOptional = true)]
-        string eo_time = null;
-        //[Input(IsOptional = true)]
-        double eo_durn = Double.NaN;
-
-        double[] SWIMRainTime = new double[0];
-        double[] SWIMRainAmt = new double[0];
-        double[] SWIMEqRainTime = new double[0];
-        double[] SWIMEqRainAmt = new double[0];
-        double[] SWIMEvapTime = new double[0];
-        double[] SWIMEvapAmt = new double[0];
-        double[][] SWIMSolTime;
-        double[][] SWIMSolAmt;
-        double[] SubSurfaceInFlow;
-
-        double TD_runoff;
-        double TD_rain;
-        double TD_evap;
-        double TD_pevap;
-        double TD_drain;
-        double TD_subsurface_drain;
-        double[] TD_soldrain;
-        double[] TD_slssof;
-        double[] TD_wflow;
-        double[][] TD_sflow;
-
-        double t;
-        double _dt;
-
-        double _wp;
-        //double wp0;
-
-        double[] _p;
-        double[] _psi = null;
-        double[] th = null;
-        double[] thold;
-        double[] hk;
-        double[] q;
-        double _h;
-        double hold;
-        double ron;
-        double roff;
-        double res;
-        double resp;
-        double rex;
-        double rssf;
-        double[] qs;
-        double[] qex;
-        double[] qexpot;
-        double[] qssif;
-        double[] qssof;
-
-
-        double[][] dc;
-        double[][] csl;
-        double[][] cslt;
-        double[][] qsl;
-        double[][] qsls;
-        double[] slsur;
-        double[] cslsur;
-        double[] rslon;
-        double[] rsloff;
-        double[] rslex;
-
-        bool[][] demand_is_met;
-
-        int[] solute_owners;
-
-        double _work;
-        double slwork;
-
-        double _hmin = 0;
-
-        double gsurf;
+        private const double floatComparisonTolerance = 1e-16;
+        private const double divideTolerance = 1e-8;
+        private const double effpar = 0.184;
+        private const double a_to_evap_fact = 0.44; // converts residue specfic area 'A' to"
 
         /// <summary>
-        /// (/h)
+        /// coef. in exp effect of canopy on soil water evaporation. In previous version initialised to 1.7.
         /// </summary>
-        double initial_conductance = Double.NaN;
-
-        int day;
-        int year;
-        double apsim_timestep = 1440.0;
-        int start_day;
-        int start_year;
-        string apsim_time = "00:00";
-        bool run_has_started;
-
-        //double psim;
-        double[] psimin;
-        double[] rtp;
-        double[] rt;
-        double[] ctp;
-        double[] ct;
-        double[][] qr;
-        double[][] qrpot;
-
-        string[] crop_names;
-        string[] crop_owners;
-        int[] crop_owner_id;
-        bool[] crop_in;
-        bool[] demand_received;
-        int num_crops;
-        int[] supply_event_id;  // Indicates the event number for sending CohortWaterSupply
-
-        int[] uptake_water_id; // Property number for returning crop water uptake
-        int[][] supply_solute_id; // Property number for returning crop solute supply
-
-        int[] leach_id;
-        int[] flow_id;
-        int[] exco_id;
-        int[] conc_water_id;
-        int[] conc_adsorb_id;
-        int[] subsurface_drain_id;
-
-        int nveg = 0;
-        double[][] RootRadius; // Was root_radius
-        double[][] RootConductance; // was root_conductance
-        double[] pep;
-        double[][] solute_demand;
-        double[] canopy_height;
-        double[] cover_tot;
-
-        double crop_cover = 0;
-        double residue_cover;
-        double _cover_green_sum;
-        double _cover_surface_runoff;
-
-        double qbp;
-        //double qbpd = 0;
-        double[] qslbp;
-
-        double gf;
-
-        double[] swta;
-
-        double[][][] psuptake;
-        double[][] pwuptake;
-        double[][] pwuptakepot;
-        double[][] cslold;
-        double[][] cslstart;
-
-        //bool crops_found;
-        double[] _psix;
-
-        double CN_runoff;
-        double[,] DELk;
-        double[,] Mk;
-        double[,] M0;
-        double[,] M1;
-        double[,] Y0;
-        double[,] Y1;
-        double[] MicroP;
-        double[] MicroKs;
-        double[] Kdula;
-        double[] MacroP;
-
-        #endregion
-
-        #region parameters
-
-        //[Param]
-        string evap_source = "calc";
-
-        //[Param(IsOptional = true)]
-        string echo_directives = null;
-
-        //double[] P;
-        double[] c;
-        double[] k;
-        double[] psid;
-
-        bool ivap;
-        int isbc = 0; // No storage of water on soil surface
-        int itbc = 0; // Infinite surface conductance
-        int ibbc;
-
-        string[] solute_names;
-        int num_solutes = 0;
-
-
-
-        double _hm0;
-
-        //[Input(IsOptional = true)]
-        [Units("mm")]
-        double hm0 = 0;
-
-        double minimum_surface_storage = Double.NaN;
-
-        double _hm1;
-        //[Input(IsOptional = true)]
-        [Units("mm")]
-        double hm1 = 0;
-        double maximum_surface_storage = Double.NaN;
-
-        double _hrc;
-        //[Input(IsOptional = true)]
-        [Units("mm")]
-        double hrc = 0;
-        // AAARRGGH! "precipitation_constant" is used both as a parameter in mm for hrc, and in cm for grc (though not both at once, presumably)
-        // Actually, those two should be in different sections of the init data, but I haven't implemented that correctly.
-        double precipitation_constant = Double.NaN;
-
-        //[Param(IsOptional = true, MinVal = 1.0e-6, MaxVal = 100.0, Name = "runoff_rate_factor")]
-        [Units("mm/mm^p")]
-        double roff0 = 0;
-
-        //[Param(IsOptional = true, MinVal = 0.1, MaxVal = 10.0, Name = "runoff_rate_power")]
-        double roff1 = 0;
-
-        double _g0;
-        //[Input(IsOptional = true)]
-        [Units("mm")]
-        double g0 = Double.NaN;
-        //[Param(IsOptional = true, MinVal = 0.0, MaxVal = 100.0)]
-        [Units("/h")]
-        double minimum_conductance = Double.NaN;
-
-        double _g1;
-        //[Input(IsOptional = true)]
-        [Units("/h")]
-        double g1 = Double.NaN;
-        //[Param(IsOptional = true, MinVal = 0.0, MaxVal = 1.0e6)]
-        [Units("/h")]
-        double maximum_conductance = Double.NaN;
-
-        double _grc;
-        //[Input(IsOptional = true)]
-        [Units("cm")]
-        double grc = 0;
-        //[Param(IsOptional = true, MinVal = 1.0, MaxVal = 1000.0)]
-        //[Units("cm")]
-        //double precipitation_constant = Double.NaN;
-
-        double[][] ex;
-        double[] cslgw;
-        double[] slupf;
-        double[] slsci;
-        double[] slscr;
-        double[] dcon;
-
-        double[][] fip;
-
-        double bbc_value;
-        double water_table_conductance = 0;
-
-        double[] init_psi;
-        double[][] exco;
-
-        int n;
-        double[] x;
-        double[] dx;
-
-        //Has the soilwat_init() been done? If so, let the fractional soil arrays (eg. sw, sat, dul etc) check the profile
-        //layers when a "set" occurs. If not, save reset values so they can be applied if a reset event is sent.
-        bool initDone = false;
-        //If doing a reset, we don't want to check profile layer data until ALL the various values have been reset. This flag
-        //tells us whether we're doing a reset; if so, we can skip checking.
-        //bool inReset = false;
-
-        double[] reset_psi = null;
-        double[] reset_theta = null;
-
-        #endregion
-
-        #region "Constants" (actually they are parameters)
-
-        ////[Param(MinVal = 0, MaxVal = 1e10)]
-        //[Units("kg/ha")]
-        //double lb_solute;
-
-        ////[Param(MinVal = 0, MaxVal = 1e10)]
-        //[Units("kg/ha")]
-        //double ub_solute;
-
-        // Constants read from swim3.xml file in APSIM 7.10 
-        
-        /// <summary>
-        /// converts residue specfic area 'A' to"
-        /// </summary>
-        private double a_to_evap_fact = 0.44;
-
-        /// <summary>
-        /// coef. in exp effect of canopy on
-        /// </summary>
-        private double canopy_eos_coef = 0;
-
-        /// <summary>
-        /// The effect of residue and canopy cover is implemented as in the soilwat model.
-        /// These can be turn off for compatibility with SWIM standalone.
-        /// </summary>
-        private bool cover_effects = true;
+        private const double canopy_eos_coef = 1.7;
 
         /// <summary>
         /// reducing pot. soil evap. = 1.7 Adams, Arkin and Ritchie 1976
@@ -384,106 +72,342 @@ namespace Models.Soils
         /// <summary>
         /// default canopy factor in absence of height
         /// </summary>
-        private double canopy_fact_default = 0.5;
+        private const double canopy_fact_default = 0.5;
 
-        //int num_canopy_fact = 0;          // number of canopy factors read ()
-
-        // [Param(MinVal = 0.0, MaxVal = 10.0)]
         /// <summary>
         /// Negative solute concentration below which a warning error is thrown
         /// </summary>
-        private double negative_conc_warn = 0;
+        private const double negative_conc_warn = 0;
 
-        //[Param(MinVal = 0.0, MaxVal = 10.0)]
         /// <summary>
         /// Negative solute concentration below which a fatal error is thrown
         /// </summary>
-        private double negative_conc_fatal = 0;
+        private const double negative_conc_fatal = 0;
 
         /// <summary>
         /// number of iterations before timestep is halved
         /// </summary>
-        private int max_iterations = 50;
+        private const int max_iterations = 50;
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
-        private double ersoil = 0.000001;
+        private const double ersoil = 0.000001;
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
-        private double ernode = 0.000001;
+        private const double ernode = 0.000001;
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
-        private double errex = 0.01;
+        private const double errex = 0.01;
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
-        private double dppl = 1;
+        private const double dppl = 1;
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
-        private double dpnl = 1;
+        private const double dpnl = 1;
 
         /// <summary>
-        /// 
         /// </summary>
-        private double slcerr = 0.000001;
-        
-        /// <summary>
-        /// 
-        /// </summary>
-        private double min_xylem_potential = -15000;  
+        private const double slcerr = 0.000001;
+
+        private const double hydrol_effective_depth = 450;
+
+        private double[] _swf;
+        private string rain_time = null;
+        private double rain_durn = Double.NaN;
+        private double rain_int = Double.NaN;
+        private double[] SWIMRainTime = new double[0];
+        private double[] SWIMRainAmt = new double[0];
+        private double[] SWIMEqRainTime = new double[0];
+        private double[] SWIMEqRainAmt = new double[0];
+        private double[] SWIMEvapTime = new double[0];
+        private double[] SWIMEvapAmt = new double[0];
+        private double[][] SWIMSolTime;
+        private double[][] SWIMSolAmt;
+        private double[] SubSurfaceInFlow;
+        private double TD_runoff;
+        private double TD_rain;
+        private double TD_evap;
+        private double TD_pevap;
+        private double TD_drain;
+        private double TD_subsurface_drain;
+        private double[] TD_soldrain;
+        private double[] TD_slssof;
+        private double[] TD_wflow;
+        private double t;
+        private double _dt;
+        private double _wp;
+        private double[] _p;
+        private double[] _psi = null;
+        private double[] th = null;
+        private double[] thold;
+        private double[] hk;
+        private double[] q;
+        private double _h;
+        private double hold;
+        private double ron;
+        private double roff;
+        private double res;
+        private double resp;
+        private double rex;
+        private double rssf;
+        private double[] qs;
+        private double[] qex;
+        private double[] qexpot;
+        private double[] qssif;
+        private double[] qssof;
+        private double[][] dc;
+        private double[][] csl;
+        private double[][] cslt;
+        private double[][] qsl;
+        private double[][] qsls;
+        private double[] slsur;
+        private double[] cslsur;
+        private double[] rslon;
+        private double[] rsloff;
+        private double[] rslex;
+        private bool[][] demand_is_met;
+        private int[] solute_owners;
+        private double _work;
+        private double slwork;
+        private double _hmin = 0;
+        private double gsurf;
+        private double initial_conductance = Double.NaN;
+        private int day;
+        private int year;
+        private double apsim_timestep = 1440.0;
+        private int start_day;
+        private int start_year;
+        private int _apsimTimeMinutes = 0;
+        private bool run_has_started;
+        private double[] psimin;
+        private double[] rtp;
+        private double[] rt;
+        private double[] ctp;
+        private double[] ct;
+        private double[][] qr;
+        private double[][] qrpot;
+        private string[] crop_names;
+        private string[] crop_owners;
+        private int[] crop_owner_id;
+        private bool[] crop_in;
+        private bool[] demand_received;
+        private int num_crops;
+        private int[] supply_event_id;  // Indicates the event number for sending CohortWaterSupply
+        private int[] uptake_water_id; // Property number for returning crop water uptake
+        private int[][] supply_solute_id; // Property number for returning crop solute supply
+        private int[] leach_id;
+        private int[] flow_id;
+        private int[] exco_id;
+        private int[] conc_water_id;
+        private int[] conc_adsorb_id;
+        private int[] subsurface_drain_id;
+        private int nveg = 0;
+        private double[][] RootRadius; // Was root_radius
+        private double[][] RootConductance; // was root_conductance
+        private double[] pep;
+        private double[][] solute_demand;
+        private double[] canopy_height;
+        private double[] cover_tot;
+        private double crop_cover = 0;
+        private double residue_cover;
+        private double _cover_green_sum;
+        private double _cover_surface_runoff;
+        private double qbp;
+        private double[] qslbp;
+        private double gf;
+        private double[] swta;
+        private double[][][] psuptake;
+        private double[][] pwuptake;
+        private double[][] pwuptakepot;
+        private double[][] cslold;
+        private double[][] cslstart;
+        private double[] _psix;
+        private double CN_runoff;
+        private HyProps HP = new HyProps();
+        private int ifirst = 0;
+        private int ilast = 0;
+        private double gr = 0.0;
+        private string evap_source = "calc";
+        private string echo_directives = null;
+        private double[] c;
+        private double[] k;
+        private int isbc = 0; // No storage of water on soil surface
+        private int itbc = 0; // Infinite surface conductance
+        private int ibbc;
+        private string[] solute_names;
+        private int num_solutes = 0;
+        private double _hm0;
+        private double hm0 = 0;
+        private double minimum_surface_storage = Double.NaN;
+        private double _hm1;
+        private double hm1 = 0;
+        private double maximum_surface_storage = Double.NaN;
+        private double _hrc;
+        private double hrc = 0;
+        private double precipitation_constant = Double.NaN;
+        private double roff0 = 0;
+        private double roff1 = 0;
+        private double _g0;
+        private double g0 = Double.NaN;
+        private double minimum_conductance = Double.NaN;
+        private double _g1;
+        private double g1 = Double.NaN;
+        private double maximum_conductance = Double.NaN;
+        private double _grc;
+        private double grc = 0;
+        private double[][] ex;
+        private double[] cslgw;
+        private double[] slupf;
+        private double[] slsci;
+        private double[] slscr;
+        private double[] dcon;
+        private double[][] fip;
+        private double bbc_value;
+        private double[] init_psi;
+        private double[][] exco;
+        private int n;
+        private double[] x;
+        private double[] dx;
+        private bool initDone = false;
+        private double[] reset_psi = null;
+        private double[] reset_theta = null;
+        private double[] slos;
+        private double[] d0;
+        private bool cover_effects = true; // When true, the effect of residue and canopy cover is implemented as in the soilwat model.
+
+        /// <summary>Base soil albedo</summary>
+        [Description("Bare soil albedo")]
+        [Bounds(Lower = 0.0, Upper = 1.0)]
+        [Units("0-1")]
+        public double Salb { get; set; }
+
+        /// <summary>Bare soil runoff curve number</summary>
+        [Description("Bare soil runoff curve number")]
+        [Bounds(Lower = 0.0, Upper = 100.0)]
+        public double CN2Bare { get; set; }
+
+        /// <summary>Max. reduction in curve number due to cover</summary>
+        [Description("Max. reduction in curve number due to cover")]
+        [Bounds(Lower = 0.0, Upper = 100.0)]
+        public double CNRed { get; set; }
+
+        /// <summary>Cover for max curve number reduction</summary>
+        [Description("Cover for max curve number reduction")]
+        [Bounds(Lower = 0.0, Upper = 100.0)]
+        public double CNCov { get; set; }
+
+        /// <summary>Hydraulic conductivity at DUL</summary>
+        [Description("Hydraulic conductivity at DUL (mm/d)")]
+        [Units("mm/d")]
+        [Bounds(Lower = 0.0, Upper = 10.0)]
+        public double KDul { get; set; }
+
+        /// <summary>Matric Potential at DUL.</summary>
+        [Description("Matric Potential at DUL (cm)")]
+        [Units("cm")]
+        [Bounds(Lower = -1e3, Upper = 0.0)]
+        public double PSIDul { get; set; }
+
+        /// <summary>Vapour Conductivity Calculations.</summary>
+        [Description("Vapour Conductivity Calculations?")]
+        public bool VC { get; set; }
+
+        /// <summary>Minimum Timestep.</summary>
+        [Description("Minimum Timestep (min)")]
+        [Units("min")]
+        [Bounds(Lower = 0.0, Upper = 1440.0)]
+        public double DTMin { get; set; }
+
+        /// <summary>Maximum Timestep.</summary>
+        [Description("Maximum Timestep (min)")]
+        [Units("min")]
+        [Bounds(Lower = 0.01, Upper = 1440.0)]
+        public double DTMax { get; set; }
+
+        /// <summary>Maximum water increment.</summary>
+        [Description("Maximum water increment (mm)")]
+        [Units("mm")]
+        public double MaxWaterIncrement { get; set; }
+
+        /// <summary>Space weighting factor.</summary>
+        [Description("Space weighting factor")]
+        public double SpaceWeightingFactor { get; set; }
+
+        /// <summary>Solute space weighting factor.</summary>
+        [Description("Solute space weighting factor")]
+        public double SoluteSpaceWeightingFactor { get; set; }
+
+        /// <summary>Dispersivity.</summary>
+        [Description("Dispersivity((cm^2/h)/(cm/h)^p)")]
+        [Units("(cm^2/h)/(cm/h)^p")]
+        public double Dis { get; set; }
+
+        /// <summary>Dispersivity Power.</summary>
+        [Description("Dispersivity Power")]
+        public double Disp { get; set; }
+
+        /// <summary>Tortuosity Constant.</summary>
+        [Description("Tortuosity Constant")]
+        public double A { get; set; }
+
+        /// <summary>Tortuoisty Offset.</summary>
+        [Description("Tortuoisty Offset")]
+        public double DTHC { get; set; }
+
+        /// <summary>Tortuoisty Power.</summary>
+        [Description("Tortuoisty Power")]
+        public double DTHP { get; set; }
+
+        /// <summary>Tortuoisty Power.</summary>
+        public double vcon1 { get; set; } = 7.28e-9;
+
+        /// <summary>Tortuoisty Power.</summary>
+        public double vcon2 { get; set; } = 7.26e-7;
+
+        /// <summary>Internal representation of eo_time as minute of day.</summary>
+        private int _eoTimeMinutes = 360;
+
+        /// <summary>Time of evaporation (hh:mm).</summary>
+        [Description("Time of evaporation (hh:mm). Default: 06:00")]
+        public string eo_time
+        {
+            get => $"{_eoTimeMinutes / 60:D2}:{_eoTimeMinutes % 60:D2}";
+            set => _eoTimeMinutes = TimeToMins(value);
+        }
+
+        /// <summary>Duration of evaporation (min).</summary>
+        [Description("Duration of evaporation (min). Default: 720")]
+        public double eo_durn { get; set; } = 720;
 
         /// <summary>
-        /// 
+        /// default  start time of rainfall (hh:mm)
         /// </summary>
-        private double root_radius = 0.25;
-
-        /// <summary>
-        /// 
-        /// </summary>
-        private double root_conductance = 1.4e-7;
-
-        /// <summary>
-        /// default time of rainfall (hh:mm)
-        /// </summary>
-        private string default_rain_time = "00:00";
+        [Description("Default start time of the rainfall for the day (hh:mm)")]
+        public string default_rain_time { get; set; } = "00:00";
 
         /// <summary>
         /// default duration of rainfall (min)
         /// </summary>
-        private double default_rain_duration = 1440.0;
+        [Description("Default duration of the rainfall for the day (min)")]
+        public double default_rain_duration { get; set; } = 720.0;
 
-        /// <summary>
-        /// default time of evaporation (hh:mm)
-        /// </summary>
-        private string default_evap_time = "06:00";
+        /// <summary>Show diagnostic information?</summary>
+        [Description("Diagnostic Information?")]
+        public bool Diagnostics { get; set; }
 
-        /// <summary>
-        /// default duration of evaporation (min)
-        /// </summary>
-        private double default_evap_duration = 720; 
-
-        /// <summary>
-        /// 
-        /// </summary>
-        private double hydrol_effective_depth = 450;
-
-        double[] slos;
-        double[] d0;
-        #endregion
-
-        /// <summary>
-        /// 
-        /// </summary>
+        /// <summary>Theta</summary>
+        [JsonIgnore]
         [Units("cm^3/cm^3")]
-        public double[] theta
+        public double[] Theta
         {
             get
             {
@@ -496,156 +420,49 @@ namespace Models.Soils
             }
         }
 
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //private double no3slos = 0.0;
-
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //private double nh4slos = 0.0;
-
-        ///// <summary>
-        /////
-        ///// </summary>
-        //private double ureaslos = 0.0;
-
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //private double clslos = 0.61;
-
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //private double tracerslos = 0.61;
-
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //private double nitrificationinhibitorslos = 0.61;
-
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //private double denitrificationinhibitorslos = 0.61;
-
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //private double mineralisationinhibitorslos = 0.61;
-
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //private double ureaseinhibitorslos = 0.61;
-
-        // [Param]
-        private bool vapour_conductivity
-        {
-            set
-            {
-                ivap = value;
-            }
-        }
-
-        #region variables we own and make available to other modules (gettable)
-        [Units("/h")]
-        //[Description("Conductivity")]
-        private double scon
-        {
-            get
-            {
-                return gsurf;
-            }
-            set
-            {
-                gsurf = value;
-                if (gsurf > _g1 || gsurf < _g0)
-                    throw new Exception("Scon set to a value outside of specified decay curve");
-            }
-        }
-
-        ///<summary>Get volumetric water content (mm/mm)</summary>
+        ///<summary>Volumetric water content</summary>
         [JsonIgnore]
+        [Units("mm/mm")]
         public double[] SW { get { return th; } set { th = value; } }
 
-        ///<summary>Get water content (mm)</summary>
+        ///<summary>Water content</summary>
         [JsonIgnore]
-        public double[] SWmm { get { return MathUtilities.Multiply(th, soilPhysical.Thickness); } }
-
-        /// <summary>Plant available water SW-LL15 (mm/mm).</summary>
-        [Units("mm/mm")]
-        public double[] PAW
-        {
-            get
-            {
-                return APSIM.Shared.APSoil.APSoilUtilities.CalcPAWC(soilPhysical.Thickness,
-                                                                  soilPhysical.LL15,
-                                                                  SW,
-                                                                  null);
-            }
-        }
-
-        /// <summary>Plant available water SW-LL15 (mm).</summary>
         [Units("mm")]
-        public double[] PAWmm
-        {
-            get
-            {
-                return MathUtilities.Multiply(PAW, soilPhysical.Thickness);
-            }
-        }
+        public double[] SWmm { get { return MathUtilities.Multiply(th, physical.Thickness); } }
 
-        [Units("cm^3/cm^3")]
-        //[Description("Soil water content of layer")]
-        private double[] swf
-        {
-            get
-            {
-                return _swf;
-            }
-        }
+        /// <summary>Plant available water SW-LL15.</summary>
+        [Units("mm/mm")]
+        public double[] PAW => APSIM.Shared.APSoil.APSoilUtilities.CalcPAWC(physical.Thickness,
+                                                                            physical.LL15,
+                                                                            SW,
+                                                                            null);
 
-        ///<summary>Gets extractable soil water relative to LL15(mm)</summary>
+        /// <summary>Plant available water SW-LL15.</summary>
+        [Units("mm")]
+        public double[] PAWmm => MathUtilities.Multiply(PAW, physical.Thickness);
+
+        ///<summary>Extractable soil water relative to LL15</summary>
         [JsonIgnore]
         [Units("mm")]
         public double[] ESW
         {
             get
             {
-                double[] value = new double[n+1];
+                double[] value = new double[n + 1];
                 for (int i = 0; i <= n; i++)
-                    value[i] = Math.Max(0.0, (th[i] - soilPhysical.LL15[i]) * soilPhysical.Thickness[i]);
+                    value[i] = Math.Max(0.0, (th[i] - physical.LL15[i]) * physical.Thickness[i]);
                 return value;
             }
         }
 
-        [Units("mm")]
-        private double wp
-        {
-            get
-            {
-                return _wp;
-            }
-        }
+        /// <summary>Amount of rainfall intercepted by crop and residue canopies</summary>
+        [JsonIgnore]
+        public double PrecipitationInterception { get; set; }
 
-        [Units("mm")]
-        private double[] p
-        {
-            get
-            {
-                return _p;
-            }
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
+        /// <summary>Water potential of layer</summary>
+        [JsonIgnore]
         [Units("cm")]
-        //[Description("Water potential of layer")]
-        public double[] psi        //! water potential of layer
+        public double[] PSI
         {
             get
             {
@@ -663,6 +480,42 @@ namespace Models.Soils
             }
         }
 
+        /// <summary>Water potential of layer</summary>
+        [JsonIgnore]
+        [Units("cm/h")]
+        public double[] K
+        {
+            get
+            {
+                double[] k = new double[n+1];
+
+                for (int i = 0; i <= n; i++)
+                    k[i] = HP.SimpleK(i, _psi[i], physical.SAT, physical.KS);
+                return k;
+            }
+        }
+
+
+        ///<summary>Pore Interaction Index for shape of the K(theta) curve for soil hydraulic conductivity</summary>
+        [JsonIgnore]
+        [Units("-")]
+        public double[] PoreInteractionIndex
+        {
+            get
+            {
+                return HP.PoreInteractionIndex;
+            }
+            set
+            {
+                HP.PoreInteractionIndex = value;
+                HP.SetupKCurve(n, physical.LL15, physical.DUL, physical.SAT, physical.KS, KDul, PSIDul);
+            }
+        }
+
+        /// <summary>
+        /// Soil water potential including solute concentration effects. Not currently active.
+        /// Maybe useful in the future for salinity effects on plant water uptake.
+        /// </summary>
         [Units("cm")]
         private double[] psio
         {
@@ -679,300 +532,63 @@ namespace Models.Soils
             }
         }
 
-        /// <summary>Gets the amount of water runoff (mm)</summary>
-        [JsonIgnore]
+        /// <summary>Water runoff</summary>
         [Units("mm")]
-        public double Runoff
-        {
-            get
-            {
-                return TD_runoff;
-            }
-        }
+        public double Runoff => TD_runoff;
 
-        [Units("mm")]
-        private double cn_runoff
-        {
-            get
-            {
-                return CN_runoff;
-            }
-        }
-
+        /// <summary>Surface cover effects on runoff curve number reduction.</summary>
         [Units("0-1")]
-        private double cover_surface_runoff
-        {
-            get
-            {
-                return _cover_surface_runoff;
-            }
-        }
+        public double CoverSurfaceRunoff => _cover_surface_runoff;
 
+        /// <summary>Water infiltration (rainfall and irrigation) into the surface layer.</summary>
         [Units("mm")]
-        private double infiltration
-        {
-            get
-            {
-                return TD_wflow[0];
-            }
-        }
+        public double Infiltration => TD_wflow[0];
 
-        /// <summary>Gets the actual (realised) soil water evaporation (mm)</summary>
+        /// <summary>Actual (realised) soil water evaporation</summary>
+        [Units("mm")]
+        public double Es => TD_evap;
+
+        ///<summary>Potential evaporation from soil surface</summary>
         [JsonIgnore]
         [Units("mm")]
-        public double Es
-        {
-            get
-            {
-                return TD_evap;
-            }
-        }
+        public double Eos => TD_pevap;
 
-        ///<summary>Gets potential evaporation from soil surface (mm)</summary>
+        /// <summary>Water drainage from bottom of profile</summary>
         [JsonIgnore]
         [Units("mm")]
-        public double Eos
-        {
-            get
-            {
-                return TD_pevap;
-            }
-        }
+        public double Drainage => TD_drain;
 
-        /// <summary>Gets the amount of water drainage from bottom of profile(mm)</summary>
-        [JsonIgnore]
-        [Units("mm")]
-        public double Drainage
-        {
-            get
-            {
-                return TD_drain;
-            }
-        }
-
-        /// <summary>Gets potential evapotranspiration of the whole soil-plant system (mm)</summary>
+        /// <summary>Potential evapotranspiration of the whole soil-plant system</summary>
         [JsonIgnore]
         [Units("mm")]
         public double Eo { get; set; }
 
-        [Units("cm")]
-        private double[] psix
-        {
-            get
-            {
-                return _psix;
-            }
-        }
-
-        /// <summary>Amount of water moving upward from each soil layer during unsaturated flow (negative value means downward movement) (mm)</summary>
+        /// <summary>Amount of water moving upward from each soil layer during unsaturated flow (negative value means downward movement)</summary>
         [JsonIgnore]
         [Units("kg/ha")]
         public double[] Flow
         {
             get
             {
-                double[] flow = new double[n];
-
                 // Flow represents flow downward out of a layer
                 // and so start at node 1 (not 0)
                 double[] value = new double[n];
-                for (int i = 1; i <= n; i++)
+                for (int i = 1; i < n; i++)
                     value[i] = TD_wflow[i];
                 return value;
             }
         }
 
-        /// <summary>
-        /// Base soil albedo
-        /// </summary>
-        [Description("Bare soil albedo")]
-        [Bounds(Lower = 0.0, Upper = 1.0)]
-        [Units("0-1")]
-        public double Salb { get; set; }
-
-        /// <summary>
-        /// Gets the bare soil runoff curve number
-        /// </summary>
-        [Description("Bare soil runoff curve number")]
-        [Bounds(Lower = 0.0, Upper = 100.0)]
-        public double CN2Bare { get; set; }
-
-        /// <summary>
-        /// Gets the max. reduction in curve number due to cover
-        /// </summary>
-        [Description("Max. reduction in curve number due to cover")]
-        [Bounds(Lower = 0.0, Upper = 100.0)]
-        public double CNRed { get; set; }
-
-        /// <summary>
-        /// Gets the cover for max curve number reduction
-        /// </summary>
-        [Description("Cover for max curve number reduction")]
-        [Bounds(Lower = 0.0, Upper = 100.0)]
-        public double CNCov { get; set; }
-
-        /// <summary>
-        /// Gets the hydraulic conductivity at DUL (mm/d)
-        /// </summary>
-        [Description("Hydraulic conductivity at DUL (mm/d)")]
-        [Units("mm/d")]
-        [Bounds(Lower = 0.0, Upper = 10.0)]
-        public double KDul { get; set; }
-
-        /// <summary>
-        /// Gets the matric Potential at DUL (cm)
-        /// </summary>
-        [Description("Matric Potential at DUL (cm)")]
-        [Units("cm")]
-        [Bounds(Lower = -1e3, Upper = 0.0)]
-        public double PSIDul { get; set; }
-
-        /// <summary>
-        /// Gets the Vapour Conductivity Calculations
-        /// </summary>
-        [Description("Vapour Conductivity Calculations?")]
-        public bool VC { get; set; }
-
-        /// <summary>
-        /// Gets the Minimum Timestep (min)
-        /// </summary>
-        [Description("Minimum Timestep (min)")]
-        [Units("min")]
-        [Bounds(Lower = 0.0, Upper = 1440.0)]
-        public double DTMin { get; set; }
-
-        /// <summary>
-        /// Gets the Maximum Timestep (min)
-        /// </summary>
-        [Description("Maximum Timestep (min)")]
-        [Units("min")]
-        [Bounds(Lower = 0.01, Upper = 1440.0)]
-        public double DTMax { get; set; }
-
-        /// <summary>
-        /// Gets or sets the maximum water increment.
-        /// </summary>
-        [Description("Maximum water increment (mm)")]
-        public double MaxWaterIncrement { get; set; }
-
-        /// <summary>
-        /// Gets or sets the space weighting factor.
-        /// </summary>
-        [Description("Space weighting factor")]
-        public double SpaceWeightingFactor { get; set; }
-        
-        /// <summary>
-        /// Gets or sets the solute space weighting factor.
-        /// </summary>
-        [Description("Solute space weighting factor")]
-        public double SoluteSpaceWeightingFactor { get; set; }
-
-        /// <summary>Gets or sets the dis.</summary>
-        [Description("Dispersivity - dis ((cm^2/h)/(cm/h)^p)")]
-        public double Dis { get; set; }
-
-        /// <summary>Gets or sets the disp.</summary>
-        [Description("Dispersivity Power - disp")]
-        public double Disp { get; set; }
-
-        /// <summary>Gets or sets a.</summary>
-        [Description("Tortuosity Constant - a")]
-        public double A { get; set; }
-
-        /// <summary>Gets or sets the DTHC.</summary>
-        [Description("Tortuoisty Offset - dthc")]
-        public double DTHC { get; set; }
-
-        /// <summary>Gets or sets the DTHP.</summary>
-        [Description("Tortuoisty Power - dthp")]
-        public double DTHP { get; set; }
-
-
-        /// <summary>
-        /// Gets or sets a value indicating whether Diagnostic Information? is shown
-        /// </summary>
-        [Description("Diagnostic Information?")]
-        public bool Diagnostics { get; set; }
-
+        /// <summary>Pond depth.</summary>
         [Units("mm")]
-        private double hmin
-        {
-            get
-            {
-                return isbc == 2 ? _hmin * 10.0 : _hmin;
-            }
-            set
-            {
-                _hmin = value;
-            }
-        }
+        public double Pond => _h * 10.0;
 
+        /// <summary>Subsurface drain.</summary>
         [Units("mm")]
-        private double h
-        {
-            get
-            {
-                return _h * 10.0;
-            }
-        }
-
-        /// <summary>Pond depth (mm)</summary>
-        [Units("mm")]
-        public double pond
-        {
-            get
-            {
-                return _h * 10.0;
-            }
-        }
-
-        [Units("/h")]
-        private double scon_min
-        {
-            get
-            {
-                return _g0;
-            }
-        }
-
-
-        [Units("/h")]
-        private double scon_max
-        {
-            get
-            {
-                return _g1;
-            }
-        }
-
-        [Units("mm")]
-        private double dr
-        {
-            get
-            {
-                return (CRain(t) - CRain(t - _dt)) * 10.0;
-            }
-        }
-
-        [Units("min")]
-        private double dt
-        {
-            get
-            {
-                return _dt * 60.0;
-            }
-        }
-
-        [Units("mm")]
-        private double subsurface_drain
-        {
-            get
-            {
-                return TD_subsurface_drain;
-            }
-        }
+        public double SubsurfaceDrain => TD_subsurface_drain;
 
         /// <summary>Water table depth (mm)</summary>
+        [JsonIgnore]
         [Units("mm")]
         public double WaterTable
         {
@@ -982,27 +598,77 @@ namespace Models.Soils
             }
             set
             {
-                
+                throw new NotImplementedException("Cannot set water table in SWIM");
             }
         }
 
-        private double work
+        /// <summary>Rainfall less than intercepted by the canopy and residue components (Set by Microclimate).</summary>
+        [JsonIgnore]
+        public double PotentialInfiltration { get; set; }
+
+        ///<summary>Soil thickness for each layer (mm)(</summary>
+        [JsonIgnore]
+        public double[] Thickness { get { return physical.Thickness; } }
+
+        /// <summary>Amount of water moving laterally out of the profile (mm)</summary>
+        [JsonIgnore]
+        public double[] LateralOutflow { get { throw new NotImplementedException("SWIM doesn't implement a LateralOutflow property"); } }
+
+        /// <summary>NO3 movement out of a sub surface drain. </summary>
+        public double SubsurfaceDrainNO3 => TD_slssof[SoluteIndex("NO3")];
+
+        /// <summary>NH4 movement out of a sub surface drain. </summary>
+        public double SubsurfaceDrainNH4 => TD_slssof[SoluteIndex("NH4")];
+
+        /// <summary>NH4 movement out of a sub surface drain. </summary>
+        public double SubsurfaceDrainUrea => TD_slssof[SoluteIndex("Urea")];
+
+        /// <summary>CL movement out of a sub surface drain. </summary>
+        public double SubsurfaceDrainCL => TD_slssof[SoluteIndex("CL")];
+
+        /// <summary>NO3 leached from the bottom of the profile.</summary>
+        public double LeachNO3 => TD_soldrain[SoluteIndex("NO3")];
+
+        /// <summary>NH4 leached from the bottom of the profile.</summary>
+        public double LeachNH4 => TD_soldrain[SoluteIndex("NH4")];
+
+        /// <summary>Urea leached from the bottom of the profile.</summary>
+        public double LeachUrea => TD_soldrain[SoluteIndex("Urea")];
+
+        /// <summary>CL leached from the bottom of the profile.</summary>
+        public double LeachCl => TD_soldrain[SoluteIndex("Cl")];
+
+        /// <summary>Amount of NO3 not adsorbed (ppm).</summary>
+        public double[] ConcWaterNO3 => ConcWaterSolute(SoluteIndex("NO3"));
+
+        /// <summary>Amount of NH4 not adsorbed (ppm).</summary>
+        public double[] ConcWaterNH4 => ConcWaterSolute(SoluteIndex("NH4"));
+
+        /// <summary>Amount of Urea not adsorbed (ppm).</summary>
+        public double[] ConcWaterUrea => ConcWaterSolute(SoluteIndex("Urea"));
+
+        /// <summary>Amount of CL not adsorbed (ppm).</summary>
+        public double[] ConcWaterCl => ConcWaterSolute(SoluteIndex("Cl"));
+
+        /// <summary>Amount of water moving downward out of each soil layer due to gravity drainage (above DUL) (mm)</summary>
+        [JsonIgnore]
+        public double[] Flux { get { throw new NotImplementedException("SWIM doesn't implement a Flux property"); } }
+
+
+
+        // In the Fortran version, the data for ponding water was held in
+        // array members with an index of -1.
+        // In this version, I've created this structure to hold those values.
+        // Note, however, that SWIM3 in APSIM never allowed the user to
+        // set the value for isbc, which controls the way ponding is handled;
+        // as a consequence, this version of the logic remains untested.
+        private struct PondingData
         {
-            get
-            {
-                return _work;
-            }
-        }
-
-        private double swim3
-        {
-            get
-            {
-                return 1.0;
-            }
-        }
-
-        #endregion
+            public double b;
+            public double c;
+            public double rhs;
+            public double v;
+        };
 
         /// <summary>
         /// Runoff calculated by curve number - no ponding allowed.
@@ -1021,7 +687,7 @@ namespace Models.Soils
         /// <param name="precipitationConstant">Precipitation constant (mm).</param>
         /// <param name="runoffRateFactor">Runoff rate factor (mm/mm^p).</param>
         /// <param name="runoffRatePower">Runoff rate power ().</param>
-        public void SetSurfaceBCForPowerFunction(double minimumSurfaceStorage, double maximumSurfaceStorage, 
+        public void SetSurfaceBCForPowerFunction(double minimumSurfaceStorage, double maximumSurfaceStorage,
                                                  double initialSurfaceStorage, double precipitationConstant,
                                                  double runoffRateFactor, double runoffRatePower)
         {
@@ -1044,7 +710,7 @@ namespace Models.Soils
             if (ibbc != 0)
             {
                 ibbc = 0;
-                summary.WriteMessage(this, "Bottom boundary condition now constant gradient", MessageType.Diagnostic);
+                summary.WriteMessage(this, "Bottom boundary condition now constant gradient", MessageType.Information);
             }
         }
 
@@ -1058,7 +724,7 @@ namespace Models.Soils
             if (ibbc != 1)
             {
                 ibbc = 1;
-                summary.WriteMessage(this, "Bottom boundary condition now constant potential", MessageType.Diagnostic);
+                summary.WriteMessage(this, "Bottom boundary condition now constant potential", MessageType.Information);
             }
         }
 
@@ -1072,7 +738,7 @@ namespace Models.Soils
             if (ibbc != 3)
             {
                 ibbc = 3;
-                summary.WriteMessage(this, "Bottom boundary condition now a seepage potential", MessageType.Diagnostic);
+                summary.WriteMessage(this, "Bottom boundary condition now a seepage potential", MessageType.Information);
             }
         }
 
@@ -1110,48 +776,185 @@ namespace Models.Soils
         }
 
 
-
-        #region Events sent by this Module
-
-        //Events
         /// <summary>
-        /// 
+        /// Reset the model
         /// </summary>
-        public delegate void NullTypeDelegate();
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //public event NullTypeDelegate swim_timestep_preparation;
+        public void Reset()
+        {
+            ZeroVariables();
+            GetOtherVariables();
+            InitDefaults();
+            ReadParam();
+            ReadSoluteParams();
+            InitCalc();
+            CheckInputs();
+        }
 
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //public event NullTypeDelegate pre_swim_timestep;
+        /// <summary>
+        /// Perform tillage
+        /// </summary>
+        /// <param name="Tillage"></param>
+        public void Tillage(TillageType Tillage)
+        {
+            if (echo_directives != null && echo_directives.Trim() == "on")
+                summary.WriteMessage(this, "APSwim responding to tillage", MessageType.Diagnostic);
+            // THIS ISN'T RIGHT.
+            // I think the values for hm1, hm0, etc, are meant to be recovered from the event data,
+            // but they aren't fields in the current TillageType structure.
+            if (!Double.IsNaN(hm1))
+                _hm1 = hm1 / 10.0;
+            if (!Double.IsNaN(hm0))
+                _hm0 = hm0 / 10.0;
+            if (!Double.IsNaN(hrc))
+                _hrc = hrc / 10.0;
+            // Now set current storage to max storage
+            _hmin = _hm1;
+            if (!Double.IsNaN(g1))
+                _g1 = g1;
+            if (!Double.IsNaN(g0))
+                _g0 = g0;
+            if (!Double.IsNaN(grc))
+                _grc = grc / 10.0;
+            //  Now set current surface conductance to max
+            gsurf = g1;
+        }
 
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //public event NullTypeDelegate post_swim_timestep;
+        /// <summary>
+        ///
+        /// </summary>
+        public void Sum_Report()
+        {
+            //Manager module can request that each module write its variables out to the summary file. This handles that event.
 
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //public event NewProfileDelegate new_profile;
+            //+  Purpose
+            //   Report all initial conditions and input parameters to the
+            //   summary file.
 
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //public event WaterUptakesCalculatedDelegate WaterUptakesCalculated;
+            //+  Constant Values
+            const int num_psio = 13;
 
-        ///// <summary>
-        ///// 
-        ///// </summary>
-        //public event RunoffEventDelegate RunoffEvent;
+            double[,] tho = new double[n + 1, num_psio];
+            double[,] hklo = new double[n + 1, num_psio];
+            double[,] hko = new double[n + 1, num_psio];
+            double thd;
+            double hklgd;
+
+            //+  Initial Data Values
+            double[] psio = new double[num_psio] { -0.01, -1, -10.0, -25.0, -100.0, -330.0, -1000.0, -3000.0, -15000.0, -1.0e5, -5.0e5, -1.0e6, -6.0e6 };
+
+            summary.WriteMessage(this, "APSIM Soil Profile", MessageType.Diagnostic);
+
+            summary.WriteMessage(this, "---------------------------------------------------------------", MessageType.Diagnostic);
+            summary.WriteMessage(this, " x    dlayer   BD   SW     LL15   DUL   SAT      Ks      Psi", MessageType.Diagnostic);
+            summary.WriteMessage(this, "---------------------------------------------------------------", MessageType.Diagnostic);
+
+            for (int layer = 0; layer <= n; layer++)
+            {
+                summary.WriteMessage(this, String.Format("{0,6:F1} {1,6:F1}  {2,4:F3}  {3,5:F3}  {4,5:F3}  {5,5:F3}  {6,5:F3} {7,6:F2} {8,8:F2}",
+                                           x[layer] * 10.0,
+                                           physical.Thickness[layer], physical.BD[layer], th[layer],
+                                           physical.LL15[layer], physical.DUL[layer], physical.SAT[layer], physical.KS[layer],
+                                           _psi[layer]), MessageType.Diagnostic);
+
+            }
+            summary.WriteMessage(this, "---------------------------------------------------------------", MessageType.Diagnostic);
+
+            // calculate Theta and g%hk for each psio
+
+            for (int i = 0; i < num_psio; i++)
+            {
+                for (int j = 0; j <= n; j++)
+                {
+                    Interp(j, psio[i], out tho[j, i], out thd, out hklo[j, i], out hklgd);
+                    hko[j, i] = Math.Pow(10.0, hklo[j, i]);
+                }
+            }
+
+            summary.WriteMessage(this, "Soil Moisture Characteristics (volumetric water content)", MessageType.Diagnostic);
+            summary.WriteMessage(this, "----------------------------------------------------------------------------------------------------", MessageType.Diagnostic);
+            summary.WriteMessage(this, "                         Soil Water Potential (cm)", MessageType.Diagnostic);
+            summary.WriteMessage(this, "    x       0       1      10      25    100    330   1000   3000  15000  1.0e5  5.0e5  1.0e6  6.0e6", MessageType.Diagnostic);
+            summary.WriteMessage(this, "----------------------------------------------------------------------------------------------------", MessageType.Diagnostic);
+
+            for (int j = 0; j <= n; j++)
+            {
+                summary.WriteMessage(this, String.Format("{0,6:F1} | {1,6:F4} {2,6:F4} {3,6:F4} {4,6:F4} {5,6:F4} {6,6:F4} {7,6:F4} {8,6:F4} {9,6:F4} {10,6:F4} {11,6:F4} {12,6:F4} {13,6:F4}",
+                    x[j] * 10.0, tho[j, 0], tho[j, 1], tho[j, 2], tho[j, 3], tho[j, 4], tho[j, 5], tho[j, 6], tho[j, 7], tho[j, 8], tho[j, 9], tho[j, 10], tho[j, 11], tho[j, 12]), MessageType.Diagnostic);
+            }
+
+            summary.WriteMessage(this, "----------------------------------------------------------------------------------------------------", MessageType.Diagnostic);
+            summary.WriteMessage(this, "Soil Hydraulic Conductivity", MessageType.Diagnostic);
+            summary.WriteMessage(this, "----------------------------------------------------------------------------------------------------", MessageType.Diagnostic);
+            summary.WriteMessage(this, "                         Soil Water Potential (cm)", MessageType.Diagnostic);
+            summary.WriteMessage(this, "    x       0       1      10      25    100    330   1000   3000  15000  1.0e5  5.0e5  1.0e6  6.0e6", MessageType.Diagnostic);
+            summary.WriteMessage(this, "----------------------------------------------------------------------------------------------------", MessageType.Diagnostic);
+
+            for (int j = 0; j <= n; j++)
+            {
+                summary.WriteMessage(this, String.Format("{0,6:F1} | {1,8:G3} {2,8:G3} {3,8:G3} {4,8:G3} {5,8:G3} {6,8:G3} {7,8:G3} {8,8:G3} {9,8:G3} {10,8:G3} {11,8:G3} {12,8:G3} {13,8:G3}",
+                    x[j] * 10.0, hko[j, 0] * 24.0 * 10.0, hko[j, 1] * 24.0 * 10.0, hko[j, 2] * 24.0 * 10.0, hko[j, 3] * 24.0 * 10.0,
+                                 hko[j, 4] * 24.0 * 10.0, hko[j, 5] * 24.0 * 10.0, hko[j, 6] * 24.0 * 10.0, hko[j, 6] * 24.0 * 10.0 , hko[j, 7] * 24.0 * 10.0 , hko[j, 8] * 24.0 * 10.0 , hko[j, 9] * 24.0 * 10.0 , hko[j, 10] * 24.0 * 10.0 , hko[j, 11] * 24.0 * 10.0, hko[j, 12] * 24.0 * 10.0), MessageType.Diagnostic);
+            }
+
+            summary.WriteMessage(this, "-----------------------------------------------------------------------", MessageType.Diagnostic);
+            summary.WriteMessage(this, Environment.NewLine, MessageType.Diagnostic);
+
+            if (ibbc == 0)
+                summary.WriteMessage(this, String.Format("     bottom boundary condition = specified gradient ({0,10:F3})",
+                                  bbc_value), MessageType.Diagnostic);
+            else if (ibbc == 1)
+                summary.WriteMessage(this, "     bottom boundary condition = specified potential", MessageType.Diagnostic);
+            else if (ibbc == 2)
+                summary.WriteMessage(this, "     bottom boundary condition = zero flux", MessageType.Diagnostic);
+            else if (ibbc == 3)
+                summary.WriteMessage(this, "     bottom boundary condition = free drainage", MessageType.Diagnostic);
+            else
+                throw new Exception("bad bottom boundary conditions switch");
+
+            summary.WriteMessage(this, "     Evaporation Source        = " + evap_source + Environment.NewLine, MessageType.Diagnostic);
+
+            if (subsurfaceDrain != null)
+            {
+                summary.WriteMessage(this, " Subsurface Drain Model", MessageType.Diagnostic);
+                summary.WriteMessage(this, " ======================" + Environment.NewLine, MessageType.Diagnostic);
+
+                summary.WriteMessage(this, string.Format("     Drain Depth (mm) ={0,10:F3}", subsurfaceDrain.DrainDepth), MessageType.Diagnostic);
+                summary.WriteMessage(this, string.Format("     Drain Spacing (mm) ={0,10:F3}", subsurfaceDrain.DrainSpacing), MessageType.Diagnostic);
+                summary.WriteMessage(this, string.Format("     Drain Radius (mm) ={0,10:F3}", subsurfaceDrain.DrainRadius), MessageType.Diagnostic);
+                summary.WriteMessage(this, string.Format("     Imperm Layer Depth (mm)  ={0,10:F3}", subsurfaceDrain.ImpermDepth), MessageType.Diagnostic);
+                summary.WriteMessage(this, string.Format("     Lateral Conductivity (mm/d)  ={0,10:F3}", subsurfaceDrain.Klat), MessageType.Diagnostic);
+                summary.WriteMessage(this, string.Format("     Drain Open (True/False) ={0,10}", subsurfaceDrain.Open), MessageType.Diagnostic);
+            }
+
+        }
 
 
-        #endregion
+        ///<summary>Remove water from the profile</summary>
+        public void RemoveWater(double[] dlt_sw_dep)
+        {
+            if (MathUtilities.Sum(dlt_sw_dep) > 0)
+            {
+                // convert to volumetric
+                double[] newSW = MathUtilities.Divide(dlt_sw_dep, physical.Thickness, divideTolerance);
+                newSW = MathUtilities.Subtract(th, newSW);
+                ResetWaterBalance(1, ref newSW);
+                run_has_started = false;
+            }
+        }
 
-        #region Event Handlers
+        /// <summary>Sets the water table.</summary>
+        /// <param name="InitialDepth">The initial depth.</param>
+        public void SetWaterTable(double InitialDepth)
+        {
+            bbc_value = x[n] - InitialDepth / 10.0;
+            ibbc = 1;
+        }
+
+        ///<summary>Perform tillage</summary>
+        public void Tillage(string tillageType)
+        {
+            throw new NotImplementedException("SWIM doesn't implement a tillage method");
+        }
 
         /// <summary>
         /// Start of simulation event handler
@@ -1166,17 +969,9 @@ namespace Models.Soils
                 isbc = 1;
 
             ErrorChecking();
-            OnReset();
+            Reset();
             initDone = true;
             Sum_Report();
-        }
-
-        private void ErrorChecking()
-        {
-            if (soilPhysical.KS == null
-                || !MathUtilities.ValuesInArray(soilPhysical.KS)
-                || soilPhysical.KS.All(ks => ks == 0))
-                throw new ApsimXException(this, "KS not provided. Check Soil.Physical configuration");
         }
 
         /// <summary>
@@ -1191,8 +986,8 @@ namespace Models.Soils
             //     Update internal time record and reset daily state variables.
             if (initDone)
             {
-                day = Clock.Today.DayOfYear;
-                year = Clock.Today.Year;
+                day = clock.Today.DayOfYear;
+                year = clock.Today.Year;
 
 
                 // dph - need to setup g%apsim_time and g%apsim_timestep
@@ -1201,14 +996,13 @@ namespace Models.Soils
 
                 // NIH - assume daily time step for now until someone needs to
                 //       do otherwise.
-                apsim_time = "00:00";
+                _apsimTimeMinutes = 0;
                 apsim_timestep = 1440;
 
                 // Started new timestep so purge all old timecourse information
                 // ============================================================
 
-                int time_mins = TimeToMins(apsim_time);
-                double start_timestep = Time(year, day, time_mins);
+                double start_timestep = Time(year, day, _apsimTimeMinutes);
 
                 PurgeLogInfo(start_timestep, ref SWIMRainTime, ref SWIMRainAmt);
 
@@ -1235,171 +1029,13 @@ namespace Models.Soils
                         SWIMSolTime[solnum][counter] = TEMPSolTime[counter];
                         SWIMSolAmt[solnum][counter] = TEMPSolAmt[counter];
                     }
+
+                    // Zero the amount solute lost in runoff array
+                    Array.Clear(solutes[solnum].AmountLostInRunoff, 0, Thickness.Length);
                 }
 
                 SubSurfaceInFlow = new double[n + 1];
             }
-        }
-
-        /// <summary>
-        /// Reset the model
-        /// </summary>
-        public void OnReset()
-        {
-            ZeroVariables();
-            GetOtherVariables();
-            InitDefaults();
-            //ReadConstants();
-            ReadParam();
-            ReadSoluteParams();
-            // RegisterSoluteOutputs(); // This is the wrong place! We don't yet know what solutes are being modelled
-            InitCalc();
-            CheckInputs();
-            //SendNewProfile();
-        }
-
-        /// <summary>
-        /// Perform tillage
-        /// </summary>
-        /// <param name="Tillage"></param>
-        public void Tillage(TillageType Tillage)
-        {
-            if (echo_directives != null && echo_directives.Trim() == "on")
-                summary.WriteMessage(this, "APSwim responding to tillage", MessageType.Diagnostic);
-            // THIS ISN'T RIGHT. 
-            // I think the values for hm1, hm0, etc, are meant to be recovered from the event data,
-            // but they aren't fields in the current TillageType structure.
-            if (!Double.IsNaN(hm1))
-                _hm1 = hm1 / 10.0;
-            if (!Double.IsNaN(hm0))
-                _hm0 = hm0 / 10.0;
-            if (!Double.IsNaN(hrc))
-                _hrc = hrc / 10.0;
-            // Now set current storage to max storage
-            _hmin = _hm1;
-            if (!Double.IsNaN(g1))
-                _g1 = g1;
-            if (!Double.IsNaN(g0))
-                _g0 = g0;
-            if (!Double.IsNaN(grc))
-                _grc = grc / 10.0;
-            //  Now set current surface conductance to max
-            gsurf = g1;
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        public void Sum_Report()
-        {
-            //Manager module can request that each module write its variables out to the summary file. This handles that event. 
-
-            //+  Purpose
-            //   Report all initial conditions and input parameters to the
-            //   summary file.
-
-            //+  Constant Values
-            const int num_psio = 8;
-
-            double[,] tho = new double[n + 1, num_psio];
-            double[,] hklo = new double[n + 1, num_psio];
-            double[,] hko = new double[n + 1, num_psio];
-            double thd;
-            double hklgd;
-
-            //+  Initial Data Values
-            double[] psio = new double[num_psio] { -0.01, -10.0, -25.0, -100.0, -1000.0, -15000.0, -1.0e6, -1.0e7 };
-
-            summary.WriteMessage(this, "APSIM Soil Profile", MessageType.Diagnostic);
-
-            summary.WriteMessage(this, "---------------------------------------------------------------", MessageType.Diagnostic);
-            summary.WriteMessage(this, " x    dlayer   BD   SW     LL15   DUL   SAT      Ks      Psi", MessageType.Diagnostic);
-            summary.WriteMessage(this, "---------------------------------------------------------------", MessageType.Diagnostic);
-
-            for (int layer = 0; layer <= n; layer++)
-            {
-                summary.WriteMessage(this, String.Format("{0,6:F1} {1,6:F1}  {2,4:F3}  {3,5:F3}  {4,5:F3}  {5,5:F3}  {6,5:F3} {7,6:F2} {8,8:F2}",
-                                           x[layer] * 10.0,
-                                           soilPhysical.Thickness[layer], soilPhysical.BD[layer], th[layer],
-                                           soilPhysical.LL15[layer], soilPhysical.DUL[layer], soilPhysical.SAT[layer], soilPhysical.KS[layer],
-                                           _psi[layer]), MessageType.Diagnostic);
-
-            }
-            summary.WriteMessage(this, "---------------------------------------------------------------", MessageType.Diagnostic);
-
-            // calculate Theta and g%hk for each psio
-
-            for (int i = 0; i < num_psio; i++)
-            {
-                for (int j = 0; j <= n; j++)
-                {
-                    Interp(j, psio[i], out tho[j, i], out thd, out hklo[j, i], out hklgd);
-                    hko[j, i] = Math.Pow(10.0, hklo[j, i]);
-                }
-            }
-
-            summary.WriteMessage(this, "Soil Moisture Characteristics", MessageType.Diagnostic);
-            summary.WriteMessage(this, "--------------------------------------------------------------------", MessageType.Diagnostic);
-            summary.WriteMessage(this, "                         Soil Water Potential (cm)", MessageType.Diagnostic);
-            summary.WriteMessage(this, "    x       0      10      25    100   1000  15000   10^6   10^7", MessageType.Diagnostic);
-            summary.WriteMessage(this, "--------------------------------------------------------------------", MessageType.Diagnostic);
-
-            for (int j = 0; j <= n; j++)
-            {
-                summary.WriteMessage(this, String.Format("{0,6:F1} | {1,6:F4} {2,6:F4} {3,6:F4} {4,6:F4} {5,6:F4} {6,6:F4} {7,6:F4} {8,6:F4}",
-                    x[j] * 10.0, tho[j, 0], tho[j, 1], tho[j, 2], tho[j, 3], tho[j, 4], tho[j, 5], tho[j, 6], tho[j, 7]), MessageType.Diagnostic);
-            }
-
-            summary.WriteMessage(this, "--------------------------------------------------------------------", MessageType.Diagnostic);
-            summary.WriteMessage(this, "Soil Hydraulic Conductivity", MessageType.Diagnostic);
-            summary.WriteMessage(this, "-----------------------------------------------------------------------", MessageType.Diagnostic);
-            summary.WriteMessage(this, "                         Soil Water Potential (cm)", MessageType.Diagnostic);
-            summary.WriteMessage(this, "    x       0        10       25       100     1000    15000     10^6", MessageType.Diagnostic);
-            summary.WriteMessage(this, "-----------------------------------------------------------------------", MessageType.Diagnostic);
-
-            for (int j = 0; j <= n; j++)
-            {
-                summary.WriteMessage(this, String.Format("{0,6:F1} | {1,8:G3} {2,8:G3} {3,8:G3} {4,8:G3} {5,8:G3} {6,8:G3} {7,8:G3}",
-                    x[j] * 10.0, hko[j, 0] * 24.0 * 10.0, hko[j, 1] * 24.0 * 10.0, hko[j, 2] * 24.0 * 10.0, hko[j, 3] * 24.0 * 10.0,
-                                 hko[j, 4] * 24.0 * 10.0, hko[j, 5] * 24.0 * 10.0, hko[j, 6] * 24.0 * 10.0), MessageType.Diagnostic);
-            }
-
-            summary.WriteMessage(this, "-----------------------------------------------------------------------", MessageType.Diagnostic);
-            summary.WriteMessage(this, Environment.NewLine, MessageType.Diagnostic);
-
-            if (ibbc == 0)
-                summary.WriteMessage(this, String.Format("     bottom boundary condition = specified gradient ({0,10:F3})",
-                                  bbc_value), MessageType.Diagnostic);
-            else if (ibbc == 1)
-                summary.WriteMessage(this, "     bottom boundary condition = specified potential", MessageType.Diagnostic);
-            else if (ibbc == 2)
-                summary.WriteMessage(this, "     bottom boundary condition = zero flux", MessageType.Diagnostic);
-            else if (ibbc == 3)
-                summary.WriteMessage(this, "     bottom boundary condition = free drainage", MessageType.Diagnostic);
-            else if (ibbc == 4)
-                summary.WriteMessage(this, "     bottom boundary condition = water table", MessageType.Diagnostic);
-            else
-                throw new Exception("bad bottom boundary conditions switch");
-
-            if (ivap)
-                summary.WriteMessage(this, "     vapour conductivity       = on", MessageType.Diagnostic);
-            else
-                summary.WriteMessage(this, "     vapour conductivity       = off", MessageType.Diagnostic);
-
-            summary.WriteMessage(this, "     Evaporation Source        = " + evap_source + Environment.NewLine, MessageType.Diagnostic);
-
-            if (subsurfaceDrain != null)
-            {
-                summary.WriteMessage(this, " Subsurface Drain Model", MessageType.Diagnostic);
-                summary.WriteMessage(this, " ======================" + Environment.NewLine, MessageType.Diagnostic);
-
-                summary.WriteMessage(this, string.Format("     Drain Depth (mm) ={0,10:F3}", subsurfaceDrain.DrainDepth), MessageType.Diagnostic);
-                summary.WriteMessage(this, string.Format("     Drain Spacing (mm) ={0,10:F3}", subsurfaceDrain.DrainSpacing), MessageType.Diagnostic);
-                summary.WriteMessage(this, string.Format("     Drain Radius (mm) ={0,10:F3}", subsurfaceDrain.DrainRadius), MessageType.Diagnostic);
-                summary.WriteMessage(this, string.Format("     Imperm Layer Depth (mm)  ={0,10:F3}", subsurfaceDrain.ImpermDepth), MessageType.Diagnostic);
-                summary.WriteMessage(this, string.Format("     Lateral Conductivity (mm/d)  ={0,10:F3}", subsurfaceDrain.Klat), MessageType.Diagnostic);
-            }
-
         }
 
         /// <summary>Called when an irrigation occurs.</summary>
@@ -1426,15 +1062,14 @@ namespace Models.Soils
                 summary.WriteMessage(this, "APSwim adding irrigation to log", MessageType.Diagnostic);
             }
 
-            string time_string = "00:00"; // Irrigated.time;
             double amount = Irrigated.Amount;
             double duration = Irrigated.Duration;
+            int startTimeMinutes = TimeToMins(Irrigated.Time);
 
             // get information regarding time etc.
             GetOtherVariables();
 
-            int time_mins = TimeToMins(time_string);
-            double irrigation_time = Time(year, day, time_mins);
+            double irrigation_time = Time(year, day, startTimeMinutes);
 
             // allow 1 sec numerical error as data resolution is
             // 60 sec.
@@ -1449,11 +1084,11 @@ namespace Models.Soils
             for (int solnum = 0; solnum < num_solutes; solnum++)
             {
                 double solconc = 0.0;
-                if (solute_names[solnum] == "no3")
+                if (solute_names[solnum].Equals("no3", StringComparison.InvariantCultureIgnoreCase))
                     solconc = Irrigated.NO3;
-                else if (solute_names[solnum] == "nh4")
+                else if (solute_names[solnum].Equals("nh4", StringComparison.InvariantCultureIgnoreCase))
                     solconc = Irrigated.NH4;
-                else if (solute_names[solnum] == "cl")
+                else if (solute_names[solnum].Equals("cl", StringComparison.InvariantCultureIgnoreCase))
                     solconc = Irrigated.CL;
 
                 if (solconc > 0.0)
@@ -1481,13 +1116,6 @@ namespace Models.Soils
             }
         }
 
-        ////  [EventHandler]
-        //  public void OnSubsurfaceFlow(ApsimVariantType data)
-        //  {
-        //      // Left unimplemented, as no other components currently appear to send this event
-        //      // Not sure what data structure ought to be coming in
-        //  }
-
         /// <summary>
         /// Start of simulation event handler
         /// </summary>
@@ -1506,9 +1134,19 @@ namespace Models.Soils
             else
                 GetObsEvapVariables();
             OnProcess();
+
+            // Update the variable in the water model.
+            water.Volumetric = SW;
         }
 
-      //  [EventHandler]
+        private void ErrorChecking()
+        {
+            if (physical.KS == null
+                || !MathUtilities.ValuesInArray(physical.KS)
+                || physical.KS.All(ks => ks == 0))
+                throw new ApsimXException(this, "KS not provided. Check Soil.Physical configuration");
+        }
+
         private void OnProcess()
         {
             //  Purpose
@@ -1527,8 +1165,7 @@ namespace Models.Soils
             residue_cover = surfaceOrganicMatter.Cover;
             CNRunoff();
 
-            int timeOfDay = TimeToMins(apsim_time);
-            double timestepStart = Time(year, day, timeOfDay);
+            double timestepStart = Time(year, day, _apsimTimeMinutes);
             double timestep = apsim_timestep / 60.0;
 
             bool fail = DoSwim(timestepStart, timestep);
@@ -1577,93 +1214,6 @@ namespace Models.Soils
             PublishUptakes();
         }
 
-       //// [EventHandler]
-       // public void OnCohortWaterDemand(CohortWaterDemandType demand)
-       // {
-       //     //+  Purpose
-       //     //       Recieve water demand of a plant cohort within a crop
-
-       //     int fromID = (int)My.eventSenderId;
-       //     // See whether this is the first time we've encountered this crop/cohort combination      
-       //     int senderIdx = -1;
-       //     int cropNo = -1;
-       //     // Find the first entry for this crop/pasture component
-       //     for (int i = 0; i < num_crops; i++)
-       //     {
-       //         if (crop_owner_id[i] == fromID && senderIdx == 0)
-       //             senderIdx = i;
-
-       //         // Find the crop/cohort combination
-       //         if (crop_owner_id[i] == fromID && crop_names[i] == demand.CohortID)
-       //             cropNo = i;
-       //     }
-
-       //     if (senderIdx == -1)
-       //         throw new Exception("Unexpected CohortWaterDemand event in SWIM");
-
-       //     // If sender is unknown, add it to the list
-       //     if (cropNo == -1)
-       //     {
-
-       //         // If this is the first entry for the crop, and it hasn't already been converted to
-       //         // a cohort, do so now. Otherwise, add a new entry
-       //         if (supply_event_id[senderIdx] == 0)
-       //         {
-       //             cropNo = senderIdx;
-       //         }
-       //         else
-       //         {
-       //             ResizeCropArrays(num_crops + 1);
-       //             cropNo = num_crops - 1;
-       //             nveg = num_crops;
-       //             crop_owners[cropNo] = crop_owners[senderIdx];
-       //             crop_owner_id[cropNo] = fromID;
-       //             crop_in[cropNo] = true;
-       //         }
-
-       //         crop_names[cropNo] = demand.CohortID;
-
-       //         supply_event_id[cropNo] = 1; //  AddRegToDest(eventReg, fromID, "CohortWaterSupply", CohortWaterSupplyTypeDDML);
-
-       //         // Read Component Specific Constants
-       //         // ---------------------------------
-       //         AssignCropParams(num_crops - 1);
-       //         RegisterCropOutputs(num_crops - 1);
-       //     }
-
-       //     pep[cropNo] = demand.Demand / 10.0;  // convert kg/m^2 to cm
-       //     psimin[cropNo] = demand.PsiXylemMin * 1.0e4; // convert MPa to cm (approximately; use 10197 for more precision)
-       //     demand_received[cropNo] = true;
-
-       //     if (demand.RootSystemLayer.Length > 0)
-       //     {
-       //         double length = 0.0;
-
-       //         for (int i = 0; i < demand.RootSystemLayer.Length; i++)
-       //         {
-       //             // Should check number of layers
-       //             // Could also check to be sure layer depths are as expected
-       //             // We also receive ll and kl. Are they of any use?
-
-       //             rld[i][cropNo] = demand.RootSystemLayer[i].RootLengthDensity * 1.0e-4;    // Convert m/m^3 to cm/cm^3
-       //                                                                                       // If a root radius is provided, use it
-       //             if (demand.RootSystemLayer[i].RootRadius > 0.0)
-       //                 RootRadius[i][cropNo] = demand.RootSystemLayer[i].RootRadius * 1.0e-1;    // Convert mm to cm
-
-       //             // If a root conductance is provided, use it
-       //             if (demand.RootSystemLayer[i].RootConductance > 0.0)
-       //                 RootConductance[i][cropNo] = demand.RootSystemLayer[i].RootConductance;
-
-       //             length += demand.RootSystemLayer[i].RootLengthDensity * 1.0e-6 * _dlayer[i]; // Convert m/m^3 to mm/mm^3
-       //         }
-
-       //         if ((length > 0.0) && (length < min_total_root_length))
-       //             IssueWarning("Possible error with low total RLV for " + crop_owners[cropNo] + ":" + crop_names[cropNo]);
-       //     }
-       // }
-
-        #endregion
-
         private void ZeroVariables()
         {
             // This will require some thought. If we get a "reset", what values need to be re-zeroed?
@@ -1681,8 +1231,8 @@ namespace Models.Soils
 
             if (year == 0)
             {
-                year = Clock.Today.Year;
-                day = Clock.Today.Day;
+                year = clock.Today.Year;
+                day = clock.Today.Day;
             }
             start_day = day;
             start_year = year;
@@ -1711,27 +1261,25 @@ namespace Models.Soils
             InitChangeUnits();
 
             // ------------------- CALCULATE CURRENT TIME -------------------------
-            int time_mins = TimeToMins(apsim_time);
-            t = Time(year, day, time_mins);
+            t = Time(year, day, _apsimTimeMinutes);
 
             // ----------------- SET UP NODE SPECIFICATIONS -----------------------
 
             // safer to use number returned from read routine
-            int num_layers = soilPhysical.Thickness.Length;
+            int num_layers = physical.Thickness.Length;
             if (n != num_layers - 1)
                 ResizeProfileArrays(num_layers);
 
             for (int i = 0; i <= n; i++)
-                dx[i] = soilPhysical.Thickness[i] / 10.0;
+                dx[i] = physical.Thickness[i] / 10.0;
 
             x[0] = 0.0;
-            x[1] = 0.0 + dx[0] / 2.0;
-            double cumDepth = 0.0;
+            double cumDepth = dx[0];
 
-            for (int i = 2; i < n; i++)
+            for (int i = 1; i < n; i++)
             {
-                cumDepth += dx[i - 2];
-                x[i] = cumDepth + dx[i - 1] / 2.0;
+                x[i] = cumDepth + dx[i] / 2.0;
+                cumDepth += dx[i];
             }
 
             x[n] = MathUtilities.Sum(dx);
@@ -1747,8 +1295,8 @@ namespace Models.Soils
 
 
 
-            SetupThetaCurve();
-            SetupKCurve();
+            HP.SetupThetaCurve(PSIDul, n, physical.LL15, physical.DUL, physical.SAT);
+            HP.SetupKCurve(n, physical.LL15, physical.DUL, physical.SAT, physical.KS, KDul, PSIDul);
 
             // ---------- NOW SET THE ACTUAL WATER BALANCE STATE VARIABLES ---------
 
@@ -1769,22 +1317,6 @@ namespace Models.Soils
             if (ibbc == 1)
             {
                 bbc_value = x[n] - bbc_value / 10.0;
-            }
-            else if (ibbc == 4)
-            {
-                //p%bbc_value = p%x(p%n) - p%bbc_value/10d0
-                // Now reset theta to saturated below the water table
-                //         do 50 node = 0,p%n
-                //            if (p%x(node).gt.(p%bbc_value/10d0 - 100d0))then
-                //               g%psi(node) = p%x(node)-p%bbc_value/10d0
-                //               g%th(node) = apswim_Simpletheta(node,g%psi(node))
-                //               g%p(node)=apswim_pf(g%psi(node))
-                //            endif
-                //   50    continue
-
-                _psi[n] = x[n] - bbc_value / 10.0;
-                th[n] = SimpleTheta(n, _psi[n]);
-                _p[n] = Pf(_psi[n]);
             }
         }
 
@@ -1854,39 +1386,6 @@ namespace Models.Soils
                     RootRadius[i][crop] = RootRadius[i][crop] / 10.0;
         }
 
-        //private void SendNewProfile()
-        //{
-        //    //+  Purpose
-        //    //     Advise other modules of new profile specification
-
-        //    if (new_profile != null)
-        //    {
-        //        NewProfileType newProfile = new NewProfileType();
-        //        // Convert array values from doubles to floats
-        //        newProfile.dlayer = new float[n + 1];
-        //        newProfile.air_dry_dep = new float[n + 1];
-        //        newProfile.bd = new float[n + 1];
-        //        newProfile.dlayer = new float[n + 1];
-        //        newProfile.dul_dep = new float[n + 1];
-        //        newProfile.ll15_dep = new float[n + 1];
-        //        newProfile.sat_dep = new float[n + 1];
-        //        newProfile.sw_dep = new float[n + 1];
-        //        for (int i = 0; i <= n; i++)
-        //        {
-        //            newProfile.dlayer[i] = (float)_dlayer[i];
-        //            newProfile.air_dry_dep[i] = 0.0f;
-        //            newProfile.bd[i] = (float)rhob[i];
-        //            newProfile.dlayer[i] = (float)_dlayer[i];
-        //            newProfile.dul_dep[i] = (float)(soil.DUL[i] * _dlayer[i]);
-        //            newProfile.ll15_dep[i] = (float)(_ll15[i] * _dlayer[i]);
-        //            newProfile.sat_dep[i] = (float)(_sat[i] * _dlayer[i]);
-        //            newProfile.sw_dep[i] = (float)(th[i] * _dlayer[i]);
-        //        }
-        //        if (newProfile != null)
-        //            new_profile.Invoke(newProfile);
-        //    }
-        //}
-
         private void ReadParam()
         {
             if (reset_theta != null)
@@ -1899,19 +1398,12 @@ namespace Models.Soils
 
             if (reset_theta == null && reset_psi == null)
             {
-                th = initial.SWVolumetric.Clone() as double[]; 
+                th = water.InitialValues.Clone() as double[];
             }
 
-            if (waterTable != null && !Double.IsNaN(waterTable.WaterTableDepth))
-            {
-                ibbc = 1;
-                bbc_value = waterTable.WaterTableDepth;
-            }
-            else
-            {
-                ibbc = 0;
-                bbc_value = 0.0;
-            }
+            ibbc = 0;
+            bbc_value = 0.0;
+
             if (isbc == 2) // There doesn't seem to be anywhere for isbc to acquire a value other than 0  !!!!
             {
                 if (Double.IsNaN(minimum_surface_storage))
@@ -2003,108 +1495,21 @@ namespace Models.Soils
 
         //}
 
-        //private void RegisterSoluteOutputs(int solnum)
-        //{
-        //    string solutename = solute_names[solnum];
-
-        //    string variable_name = "flow_" + solutename;
-        //    flow_id[solnum] = My.RegisterProperty(variable_name, "<type kind=\"double\" array=\"T\" unit=\"kg/ha\"/>", true, false, false, "", "", getPropertyValue);
-
-        //    variable_name = "leach_" + solutename;
-        //    leach_id[solnum] = My.RegisterProperty(variable_name, "<type kind=\"double\" array=\"F\" unit=\"kg/ha\"/>", true, false, false, "", "", getPropertyValue);
-
-        //    variable_name = "exco_" + solutename;
-        //    exco_id[solnum] = My.RegisterProperty(variable_name, "<type kind=\"double\" array=\"T\"/>", true, false, false, "", "", getPropertyValue);
-
-        //    variable_name = "conc_water_" + solutename;
-        //    conc_water_id[solnum] = My.RegisterProperty(variable_name, "<type kind=\"double\" array=\"T\" unit=\"ug/g\"/>", true, false, false, "", "", getPropertyValue);
-
-        //    variable_name = "conc_adsorb_" + solutename;
-        //    conc_adsorb_id[solnum] = My.RegisterProperty(variable_name, "<type kind=\"double\" array=\"T\" unit=\"ug/g\"/>", true, false, false, "", "", getPropertyValue);
-
-        //    variable_name = "subsurface_drain_" + solutename;
-        //    subsurface_drain_id[solnum] = My.RegisterProperty(variable_name, "<type kind=\"double\" array=\"F\" unit=\"mm\"/>", true, false, false, "", "", getPropertyValue);
-        //}
-
-        //public bool getPropertyValue(int propID, ref TPropertyInfo value, bool isReqSet)
-        //{
-        //    double[] valueArray = new double[n + 1];
-        //    bool uflag;
-        //    if (isReqSet)  // currently only handling read requests, so fail if this is not.
-        //        return false;
-        //    for (int crop = 0; crop < num_crops; crop++)
-        //    {
-
-        //        if (uptake_water_id[crop] == propID)
-        //        {
-        //            GetSWUptake(crop, out valueArray, out uflag);
-        //            value.setValue(valueArray);
-        //            return true;
-        //        }
-        //        for (int sol = 0; sol < num_solutes; sol++)
-        //        {
-        //            if (supply_solute_id[crop][sol] == propID)
-        //            {
-        //                GetSupply(crop, sol, out valueArray, out uflag);
-        //                value.setValue(valueArray);
-        //                return true;
-        //            }
-        //        }
-        //    }
-
-        //    for (int solnum = 0; solnum < num_solutes; solnum++)
-        //    {
-        //        if (leach_id[solnum] == propID)
-        //        {
-        //            value.setValue(TD_soldrain[solnum]);
-        //            return true;
-        //        }
-
-        //        if (flow_id[solnum] == propID)
-        //        {
-        //            GetFlow(solute_names[solnum], out valueArray, out uflag);
-        //            value.setValue(valueArray);
-        //            return true;
-        //        }
-
-        //        if (exco_id[solnum] == propID)
-        //        {
-        //            for (int node = 0; node < n; node++)
-        //                valueArray[node] = ex[solnum][node] / rhob[node];
-        //            value.setValue(valueArray);
-        //            return true;
-        //        }
-
-        //        if (conc_water_id[solnum] == propID)
-        //        {
-        //            ConcWaterSolute(solute_names[solnum], ref valueArray);
-        //            value.setValue(valueArray);
-        //            return true;
-        //        }
-
-        //        if (conc_adsorb_id[solnum] == propID)
-        //        {
-        //            ConcAdsorbSolute(solute_names[solnum], ref valueArray);
-        //            value.setValue(valueArray);
-        //            return true;
-        //        }
-
-        //        if (subsurface_drain_id[solnum] == propID)
-        //        {
-        //            value.setValue(TD_slssof[solnum]);
-        //            return true;
-        //        }
-        //    }
-        //    return false;
-        //}
+        private int SoluteIndex(string soluteName)
+        {
+            int soluteIndex = Array.FindIndex(solute_names, s => s.Equals(soluteName, StringComparison.InvariantCultureIgnoreCase));
+            if (soluteIndex == -1)
+                throw new Exception($"Invalid solute name: {soluteName}");
+            return soluteIndex;
+        }
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
         /// <param name="vegnum"></param>
         /// <param name="uarray"></param>
         /// <param name="uflag"></param>
-        public void GetSWUptake(int vegnum, out double[] uarray, out bool uflag)
+        private void GetSWUptake(int vegnum, out double[] uarray, out bool uflag)
         {
             uflag = false;
             uarray = new double[n + 1];
@@ -2119,13 +1524,13 @@ namespace Models.Soils
         }
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
         /// <param name="vegnum"></param>
         /// <param name="sol"></param>
         /// <param name="uarray"></param>
         /// <param name="uflag"></param>
-        public void GetSupply(int vegnum, int sol, out double[] uarray, out bool uflag)
+        private void GetSupply(int vegnum, int sol, out double[] uarray, out bool uflag)
         {
             uflag = false;
             uarray = new double[n + 1];
@@ -2142,12 +1547,8 @@ namespace Models.Soils
         {
             int oldSize = n + 1;
 
-            DELk = new double[newSize, 4];
-            Mk = new double[newSize, 4];
-            M0 = new double[newSize, 5];
-            M1 = new double[newSize, 5];
-            Y0 = new double[newSize, 5];
-            Y1 = new double[newSize, 5];
+            HP.ResizePropfileArrays(newSize);
+
 
             Array.Resize(ref _swf, newSize);
             Array.Resize(ref SubSurfaceInFlow, newSize);
@@ -2168,10 +1569,7 @@ namespace Models.Soils
             Array.Resize(ref RootRadius, newSize);
             Array.Resize(ref RootConductance, newSize);
             Array.Resize(ref swta, newSize);
-            Array.Resize(ref MicroP, newSize);
-            Array.Resize(ref MicroKs, newSize);
-            Array.Resize(ref Kdula, newSize);
-            Array.Resize(ref MacroP, newSize);
+
             //Array.Resize(ref _dlayer, newSize);
             //Array.Resize(ref _ll15, newSize);
             //Array.Resize(ref soil.DUL, newSize);
@@ -2180,7 +1578,7 @@ namespace Models.Soils
             //Array.Resize(ref _air_dry, newSize);
             Array.Resize(ref c, newSize);
             Array.Resize(ref k, newSize);
-            Array.Resize(ref psid, newSize);
+
             Array.Resize(ref init_psi, newSize);
             Array.Resize(ref x, newSize);
             Array.Resize(ref dx, newSize);
@@ -2201,7 +1599,9 @@ namespace Models.Soils
 
             for (int sol = 0; sol < num_solutes; sol++)
             {
-                Array.Resize(ref TD_sflow[sol], newSize + 1);
+                var soluteFlow = solutes[sol].Flow;
+                Array.Resize(ref soluteFlow, newSize + 1);
+                solutes[sol].Flow = soluteFlow;
                 Array.Resize(ref dc[sol], newSize);
                 Array.Resize(ref csl[sol], newSize + 1);
                 Array.Resize(ref cslt[sol], newSize);
@@ -2286,30 +1686,6 @@ namespace Models.Soils
             num_crops = newSize;
         }
 
-        private void AssignCropParams(int vegnum)
-        {
-            // Now find what crops are out there and assign them the relevant
-            // ----------------------------------------------------------------
-            //                   uptake parameters
-            //                   -----------------
-
-            //      do 50 vegnum = 1,MV
-            //         g%psimin(vegnum) = 0d0
-            //         g%root_radius(vegnum) = 0d0
-            //         g%root_conductance(vegnum) = 0d0
-            //   50 continue
-
-            //      do 200 vegnum = 1,g%num_crops
-            //         found = .false.
-
-            psimin[vegnum] = min_xylem_potential;
-            for (int i = 0; i <= n; i++)
-            {
-                RootRadius[i][vegnum] = root_radius / 10.0;  // convert mm to cm
-                RootConductance[i][vegnum] = root_conductance;
-            }
-        }
-
         private void ResizeSoluteArrays(int newSize)
         {
             int oldSize = num_solutes;
@@ -2334,7 +1710,6 @@ namespace Models.Soils
             Array.Resize(ref slos, newSize);
             Array.Resize(ref d0, newSize);
 
-            Array.Resize(ref TD_sflow, newSize);
             Array.Resize(ref dc, newSize);
             Array.Resize(ref csl, newSize);
             Array.Resize(ref cslt, newSize);
@@ -2357,7 +1732,9 @@ namespace Models.Soils
 
             for (int idx = oldSize; idx < newSize; idx++)
             {
-                Array.Resize(ref TD_sflow[idx], n + 2);
+                var soluteFlow = solutes[idx].Flow;
+                Array.Resize(ref soluteFlow, n + 2);
+                solutes[idx].Flow = soluteFlow;
                 Array.Resize(ref dc[idx], n + 1);
                 Array.Resize(ref csl[idx], n + 2);
                 Array.Resize(ref cslt[idx], n + 1);
@@ -2391,13 +1768,20 @@ namespace Models.Soils
             for (int i = 0; i < solutes.Count; i++)
             {
                 solute_names[i] = solutes[i].Name;
-                SwimSoluteParameters soluteParam = FindInScope<SwimSoluteParameters>(solute_names[i]);
+                var soluteParam = Parent.FindChild<Solute>(solute_names[i]);
                 if (soluteParam == null)
                     throw new Exception("Could not find parameters for solute called " + solute_names[i]);
-                fip[i] = Layers.MapConcentration(soluteParam.FIP, soluteParam.Thickness, soilPhysical.Thickness, double.NaN);
-                exco[i] = Layers.MapConcentration(soluteParam.Exco, soluteParam.Thickness, soilPhysical.Thickness, double.NaN);
+                if (soluteParam.FIP == null || double.IsNaN(MathUtilities.Sum(soluteParam.FIP)))
+                    throw new Exception("Solute " + solute_names[i] + " does not have FIP values.");
+                if (soluteParam.Exco == null || double.IsNaN(MathUtilities.Sum(soluteParam.Exco)))
+                    throw new Exception("Solute " + solute_names[i] + " does not have EXCO values.");
+
+                fip[i] = SoilUtilities.MapConcentration(soluteParam.FIP, soluteParam.Thickness, physical.Thickness, double.NaN);
+                exco[i] = SoilUtilities.MapConcentration(soluteParam.Exco, soluteParam.Thickness, physical.Thickness, double.NaN);
+                ex[i] = MathUtilities.Multiply(exco[i], physical.BD);
                 cslgw[i] = soluteParam.WaterTableConcentration;
                 d0[i] = soluteParam.D0;
+
             }
         }
 
@@ -2414,24 +1798,20 @@ namespace Models.Soils
 
         }
 
-        /// <summary> This is set by Microclimate and is rainfall less that intercepted by the canopy and residue components </summary>
-        [JsonIgnore]
-        public double PotentialInfiltration { get; set; }
-
         private void GetRainVariables()
         {
-            string time;
             double amount = PotentialInfiltration;
             double duration = 0.0;
             double intensity;
+            int timeOfDay;
             if (string.IsNullOrWhiteSpace(rain_time))
             {
-                time = default_rain_time;
+                timeOfDay = 0;
                 duration = default_rain_duration;
             }
             else
             {
-                time = rain_time;
+                timeOfDay = TimeToMins(rain_time);
                 if (Double.IsNaN(rain_durn))
                 {
                     if (Double.IsNaN(rain_int))
@@ -2442,7 +1822,7 @@ namespace Models.Soils
                     {
                         intensity = rain_int;
                         if (intensity < 0.0 || intensity > 254.0)  // 10 inches per hour
-                            IssueWarning("Value for rain_int outside expected range");
+                            summary.WriteMessage(this, "Value for rain_int outside expected range", MessageType.Warning);
                         if (intensity > 0.0)
                             duration = amount / intensity * 60.0; // hrs -> mins
                     }
@@ -2451,12 +1831,11 @@ namespace Models.Soils
                 {
                     duration = rain_durn;
                     if (duration < 0.0 || duration > 1440.0 * 30)
-                        IssueWarning("Value for rain_durn outside expected range");
+                        summary.WriteMessage(this, "Value for rain_durn outside expected range", MessageType.Warning);
                 }
             }
             if (amount > 0.0)
             {
-                int timeOfDay = TimeToMins(time);
                 double timeMins = Time(year, day, timeOfDay);
                 InsertLoginfo(timeMins, duration, amount, ref SWIMRainTime, ref SWIMRainAmt);
             }
@@ -2478,7 +1857,7 @@ namespace Models.Soils
 
                 var plant = model as IPlant;
                 if (plant == null)
-                    plant = model.Parent as IPlant; // the canopy might be a leaf and it's parent is a plant.
+                    plant = model.FindAncestor<IPlant>(); // the canopy might be a leaf or energybalance and we need to find what plant it is on.
                 if (plant != null)
                 {
                     if (plant.IsAlive)
@@ -2496,7 +1875,7 @@ namespace Models.Soils
                     }
                 }
                 else
-                    throw new Exception($"A canopy was found that isn't a plant. Name: {(canopies[vegnum] as IModel).Name}");
+                    throw new Exception($"A canopy was found that isn't on a plant. Name: {(canopies[vegnum] as IModel).Name}");
             }
             crop_cover = 1.0 - bare;
         }
@@ -2509,8 +1888,7 @@ namespace Models.Soils
                 // current day - ie assume interception cannot come from
                 // rainfall that started before the current day.
 
-                int time_mins = TimeToMins(apsim_time);
-                double start_timestep = Time(year, day, time_mins);
+                double start_timestep = Time(year, day, _apsimTimeMinutes);
                 int start = 0;
 
                 for (int counter = 0; counter < SWIMRainTime.Length; counter++)
@@ -2528,7 +1906,7 @@ namespace Models.Soils
 
                 double tot_rain = SWIMRainAmt[SWIMRainAmt.Length - 1] - SWIMRainAmt[start];
 
-                double fraction = MathUtilities.Divide(amount, tot_rain, 1e6, divideTolerance);
+                double fraction = MathUtilities.Divide(amount, tot_rain, 1e6);
                 if (fraction > 1.0)
                     throw new Exception("Interception > Rainfall");
                 else
@@ -2544,29 +1922,14 @@ namespace Models.Soils
             if (!MathUtilities.FloatsAreEqual(apsim_timestep, 1440.0, floatComparisonTolerance))
                 throw new Exception("apswim can only calculate Eo for daily timestep");
 
-            string time;
-            double duration = 0.0;
-            if (string.IsNullOrWhiteSpace(eo_time))
-            {
-                time = default_evap_time;
-                duration = default_evap_duration;
-            }
-            else
-            {
-                time = eo_time;
-                if (Double.IsNaN(eo_durn))
-                    throw new Exception("Failure to supply eo duration data");
-                duration = eo_durn;
-            }
-            if (duration < 0.0 || duration > 1440.0 * 30)
-                IssueWarning("Value for eo duration outside expected range");
+            if (eo_durn < 0.0 || eo_durn > 1440.0 * 30)
+                summary.WriteMessage(this, "Value for eo duration outside expected range", MessageType.Warning);
 
-            int timeOfDay = TimeToMins(time);
-            double timeMins = Time(year, day, timeOfDay);
+            double timeMins = Time(year, day, _eoTimeMinutes);
 
             _cover_green_sum = GetGreenCover();
 
-            InsertLoginfo(timeMins, duration, Eo, ref SWIMEvapTime, ref SWIMEvapAmt);
+            InsertLoginfo(timeMins, eo_durn, Eo, ref SWIMEvapTime, ref SWIMEvapAmt);
         }
 
         private double GetGreenCover()
@@ -2590,6 +1953,7 @@ namespace Models.Soils
         {
             double[] solute_n = new double[n + 1];     // solute concn in layers(kg/ha)
             double[] dlt_solute_s = new double[n + 1]; // solute concn in layers(kg/ha)
+            double[] depthMidPoints = SoilUtilities.ToMidPoints(physical.Thickness);
 
             for (int solnum = 0; solnum < num_solutes; solnum++)
             {
@@ -2648,7 +2012,39 @@ namespace Models.Soils
                         solute_n[node] = Ctot;
                         dlt_solute_s[node] = Ctot - cslstart[solnum][node];
                     }
+
                     solutes[solnum].SetKgHa(SoluteSetterType.Soil, solute_n);
+
+                    // Calculate an amount of solution in solution (kg/ha)
+                    solutes[solnum].ConcInSolution = ConcWaterSolute(solnum);
+                    solutes[solnum].AmountInSolution = MathUtilities.Multiply(solutes[solnum].ConcInSolution, th);
+                    solutes[solnum].AmountInSolution = SoilUtilities.ppm2kgha(physical.Thickness, physical.BD,
+                                                                              solutes[solnum].AmountInSolution);
+                    solutes[solnum].ConcAdsorpSolute = ConcAdsorptionSolute(solnum);
+
+                    // Calculate amount of solute lost (kg/ha) in runoff water.
+                    if (TD_runoff > 0 &&
+                        solutes[solnum].DepthConstant > 0 &&
+                        solutes[solnum].MaxDepthSoluteAccessible > 0 &&
+                        solutes[solnum].MaxEffectiveRunoff > 0 &&
+                        solutes[solnum].RunoffEffectivenessAtMovingSolute > 0)
+                    {
+                        for (int layer = 0; layer < depthMidPoints.Length; layer++)
+                        {
+                            double depthAvailabilityFactor = 0;
+                            if (depthMidPoints[layer] <= solutes[solnum].MaxDepthSoluteAccessible)
+                                depthAvailabilityFactor = Math.Pow(solutes[solnum].DepthConstant / depthMidPoints[layer], 2);
+
+                            double runoffAmountFactor = Math.Min(1.0, TD_runoff / solutes[solnum].MaxEffectiveRunoff);
+
+                            solutes[solnum].AmountLostInRunoff[layer] = solutes[solnum].AmountInSolution[layer] *
+                                                                        depthAvailabilityFactor *
+                                                                        runoffAmountFactor *
+                                                                        solutes[solnum].RunoffEffectivenessAtMovingSolute;
+                        }
+                        var delta = MathUtilities.Multiply_Value(solutes[solnum].AmountLostInRunoff, -1.0);
+                        solutes[solnum].AddKgHaDelta(SoluteSetterType.Soil, delta);
+                    }
                 }
             }
         }
@@ -2742,7 +2138,7 @@ namespace Models.Soils
                 double eqrain = 0.0;
                 double amount = (SWIMRainAmt[counter] - SWIMRainAmt[counter - 1]) / 10.0;
                 double duration = SWIMRainTime[counter] - SWIMRainTime[counter - 1];
-                double avinten = MathUtilities.Divide(amount, duration, 0.0, divideTolerance);
+                double avinten = MathUtilities.Divide(amount, duration, 0.0);
 
                 if (avinten > 0.0)
                     eqrain = (1.0 + effpar * Math.Log(avinten / 2.5)) * amount;
@@ -2762,10 +2158,10 @@ namespace Models.Soils
 
         private void CNRunoff()
         {
-            CoverSurfaceRunoff(ref _cover_surface_runoff);
+            CalculateCoverSurfaceRunoff(ref _cover_surface_runoff);
 
-            double startOfDay = Time(year, day, TimeToMins(apsim_time));
-            double endOfDay = Time(year, day, TimeToMins(apsim_time) + (int)apsim_timestep);
+            double startOfDay = Time(year, day, _apsimTimeMinutes);
+            double endOfDay = Time(year, day, _apsimTimeMinutes + (int)apsim_timestep);
 
             double rain = (CRain(endOfDay) - CRain(startOfDay)) * 10.0;
 
@@ -2774,7 +2170,7 @@ namespace Models.Soils
             TD_runoff += CN_runoff;
         }
 
-        private void CoverSurfaceRunoff(ref double coverSurfaceRunoff)
+        private void CalculateCoverSurfaceRunoff(ref double coverSurfaceRunoff)
         {
             // cover cn response from perfect   - ML  & dms 7-7-95
             // nb. perfect assumed crop canopy was 1/2 effect of mulch
@@ -2856,26 +2252,26 @@ namespace Models.Soils
             double cnpd = 0.0;
             for (int layer = 0; layer <= n; layer++)
             {
-                cnpd = cnpd + (th[layer] - soilPhysical.LL15[layer]) / (soilPhysical.DUL[layer] - soilPhysical.LL15[layer]) * runoff_wf[layer];
+                cnpd = cnpd + (th[layer] - physical.LL15[layer]) / (physical.DUL[layer] - physical.LL15[layer]) * runoff_wf[layer];
             }
             cnpd = MathUtilities.Bound(cnpd, 0.0, 1.0);
 
             // reduce CN2 for the day due to cover effect
 
-            double cover_fract = MathUtilities.Divide(cover_surface_runoff, CNCov, 0.0, divideTolerance);
+            double cover_fract = MathUtilities.Divide(CoverSurfaceRunoff, CNCov, 0.0);
             cover_fract = MathUtilities.Bound(cover_fract, 0.0, 1.0);
 
             double cn2_new = CN2Bare - (CNRed * cover_fract);
 
             cn2_new = MathUtilities.Bound(cn2_new, 0.0, 100.0);
 
-            double cn1 = MathUtilities.Divide(cn2_new, (2.334 - 0.01334 * cn2_new), 0.0, divideTolerance);
-            double cn3 = MathUtilities.Divide(cn2_new, (0.4036 + 0.005964 * cn2_new), 0.0, divideTolerance);
+            double cn1 = MathUtilities.Divide(cn2_new, (2.334 - 0.01334 * cn2_new), 0.0);
+            double cn3 = MathUtilities.Divide(cn2_new, (0.4036 + 0.005964 * cn2_new), 0.0);
             double cn = cn1 + (cn3 - cn1) * cnpd;
 
             //! curve number will be decided from scs curve number table ??dms
 
-            double s = 254.0 * (MathUtilities.Divide(100.0, cn, 1000000.0, divideTolerance) - 1.0);
+            double s = 254.0 * (MathUtilities.Divide(100.0, cn, 1000000.0) - 1.0);
             double xpb = rain - 0.2 * s;
             xpb = Math.Max(xpb, 0.0);
 
@@ -2913,7 +2309,7 @@ namespace Models.Soils
 
             // check if hydro_effective_depth applies for eroded profile.
 
-            profile_depth = MathUtilities.Sum(soilPhysical.Thickness);
+            profile_depth = MathUtilities.Sum(physical.Thickness);
 
             hydrolEffectiveDepth = Math.Min(hydrol_effective_depth, profile_depth);
 
@@ -2922,7 +2318,7 @@ namespace Models.Soils
 
             for (layer = 0; layer <= hydrolEffectiveLayer; layer++)
             {
-                cum_depth += soilPhysical.Thickness[layer];
+                cum_depth += physical.Thickness[layer];
                 cum_depth = Math.Min(cum_depth, hydrolEffectiveDepth);
 
                 // assume water content to c%hydrol_effective_depth affects runoff
@@ -2936,7 +2332,7 @@ namespace Models.Soils
             }
 
             if (wf_tot < 0.9999 || wf_tot > 1.0001)
-                IssueWarning("The value for 'wf_tot' of " + wf_tot.ToString() + " is not near the expected value of 1.0");
+                summary.WriteMessage(this, "The value for 'wf_tot' of " + wf_tot.ToString() + " is not near the expected value of 1.0", MessageType.Warning);
         }
 
         private int FindSwimLayer(double depth)
@@ -2944,7 +2340,7 @@ namespace Models.Soils
             double cumDepth = 0.0;
             for (int i = 0; i <= n; i++)
             {
-                cumDepth += soilPhysical.Thickness[i];
+                cumDepth += physical.Thickness[i];
                 if (cumDepth > depth)
                     return i;
             }
@@ -2953,17 +2349,11 @@ namespace Models.Soils
 
         private double Time(int yy, int dd, int tt)
         {
-            // first we must calculate the julian date for the starting date.
-            // We will calculate time relative to this date.
-            double beginStartYear = DateUtilities.DateTimeToJulianDayNumber(new DateTime(start_year, 1, 1)) - 1.0;
-            double julianStartDate = beginStartYear + start_day - 1.0;
-
-            // all times are relative to beginning of the day
-
-            double beginYear = DateUtilities.DateTimeToJulianDayNumber(new DateTime(yy, 1, 1)) - 1.0;
-            double julianDate = beginYear + dd - 1.0;
-
-            return (julianDate - julianStartDate) * 24.0 + tt / 60.0; // Convert to hours
+            //Work out the number of days, in hours, between the start date and the given date
+            //Adapted from older code to remove Julian date calculations
+            DateTime startDate = DateUtilities.GetDate(start_day, start_year);
+            DateTime thisDate = DateUtilities.GetDate(dd, yy);
+            return (thisDate - startDate).TotalDays * 24.0 + tt / 60.0; // Convert to hours
         }
 
         private void PurgeLogInfo(double time, ref double[] SWIMTime, ref double[] SWIMAmt)
@@ -3004,8 +2394,10 @@ namespace Models.Soils
             double FTime = time + duration / 60.0;
             if (SWIMTime.Length > 0)
             {
-                if (time < SWIMTime[0])
-                    throw new Exception("log time before start of run");
+                // This check may be superfluous and wasn't really checking for what it seems to imply.  If rainfall record is purged, the first record in SWIMTime
+                // is not the first time in the simulation.
+                //if (time < SWIMTime[0])
+                //    throw new Exception("log time before start of run");
 
                 SAmt = MathUtilities.LinearInterpReal(time, SWIMTime, SWIMAmt, out inserted);
                 FAmt = MathUtilities.LinearInterpReal(FTime, SWIMTime, SWIMAmt, out inserted);
@@ -3102,13 +2494,15 @@ namespace Models.Soils
             {
                 TD_slssof[sol] = 0.0;
                 TD_soldrain[sol] = 0.0;
-                for (int node = 0; node <= n; node++)
-                    TD_sflow[sol][node] = 0.0;
+                for (int node = 0; node <= n + 1; node++)
+                    solutes[sol].Flow[node] = 0.0;
             }
+
+            for (int node = 0; node <= n + 1; node++)
+                TD_wflow[node] = 0.0;
 
             for (int node = 0; node <= n; node++)
             {
-                TD_wflow[node] = 0.0;
                 for (int vegnum = 0; vegnum < num_crops; vegnum++)
                 {
                     for (int sol = 0; sol < num_solutes; sol++)
@@ -3122,74 +2516,6 @@ namespace Models.Soils
             }
         }
 
-        private void SetupThetaCurve()
-        {
-            for (int layer = 0; layer <= n; layer++)
-            {
-                psid[layer] = PSIDul;  //- (p%x(p%n) - p%x(layer))
-
-                DELk[layer, 0] = (soilPhysical.DUL[layer] - soilPhysical.SAT[layer]) / (Math.Log10(-psid[layer]));
-                DELk[layer, 1] = (soilPhysical.LL15[layer] - soilPhysical.DUL[layer]) / (Math.Log10(-psi_ll15) - Math.Log10(-psid[layer]));
-                DELk[layer, 2] = -soilPhysical.LL15[layer] / (Math.Log10(-psi0) - Math.Log10(-psi_ll15));
-                DELk[layer, 3] = -soilPhysical.LL15[layer] / (Math.Log10(-psi0) - Math.Log10(-psi_ll15));
-
-                Mk[layer, 0] = 0.0;
-                Mk[layer, 1] = (DELk[layer, 0] + DELk[layer, 1]) / 2.0;
-                Mk[layer, 2] = (DELk[layer, 1] + DELk[layer, 2]) / 2.0;
-                Mk[layer, 3] = DELk[layer, 3];
-
-                // First bit might not be monotonic so check and adjust
-                double alpha = Mk[layer, 0] / DELk[layer, 0];
-                double beta = Mk[layer, 1] / DELk[layer, 0];
-                double phi = alpha - (Math.Pow(2.0 * alpha + beta - 3.0, 2.0) / (3.0 * (alpha + beta - 2.0)));
-                if (phi <= 0)
-                {
-                    double tau = 3.0 / Math.Sqrt(alpha * alpha + beta * beta);
-                    Mk[layer, 0] = tau * alpha * DELk[layer, 0];
-                    Mk[layer, 1] = tau * beta * DELk[layer, 0];
-                }
-
-                M0[layer, 0] = 0.0;
-                M1[layer, 0] = 0.0;
-                Y0[layer, 0] = soilPhysical.SAT[layer];
-                Y1[layer, 0] = soilPhysical.SAT[layer];
-
-                M0[layer, 1] = Mk[layer, 0] * (Math.Log10(-psid[layer]) - 0.0);
-                M1[layer, 1] = Mk[layer, 1] * (Math.Log10(-psid[layer]) - 0.0);
-                Y0[layer, 1] = soilPhysical.SAT[layer];
-                Y1[layer, 1] = soilPhysical.DUL[layer];
-
-                M0[layer, 2] = Mk[layer, 1] * (Math.Log10(-psi_ll15) - Math.Log10(-psid[layer]));
-                M1[layer, 2] = Mk[layer, 2] * (Math.Log10(-psi_ll15) - Math.Log10(-psid[layer]));
-                Y0[layer, 2] = soilPhysical.DUL[layer];
-                Y1[layer, 2] = soilPhysical.LL15[layer];
-
-                M0[layer, 3] = Mk[layer, 2] * (Math.Log10(-psi0) - Math.Log10(-psi_ll15));
-                M1[layer, 3] = Mk[layer, 3] * (Math.Log10(-psi0) - Math.Log10(-psi_ll15));
-                Y0[layer, 3] = soilPhysical.LL15[layer];
-                Y1[layer, 3] = 0.0;
-
-                M0[layer, 4] = 0.0;
-                M1[layer, 4] = 0.0;
-                Y0[layer, 4] = 0.0;
-                Y1[layer, 4] = 0.0;
-            }
-        }
-
-        private void SetupKCurve()
-        {
-            for (int layer = 0; layer <= n; layer++)
-            {
-                double b = -Math.Log(PSIDul / psi_ll15) / Math.Log(soilPhysical.DUL[layer] / soilPhysical.LL15[layer]);
-                MicroP[layer] = b * 2.0 + 3.0;
-                Kdula[layer] = Math.Min(0.99 * KDul, soilPhysical.KS[layer]);
-                MicroKs[layer] = Kdula[layer] / Math.Pow(soilPhysical.DUL[layer] / soilPhysical.SAT[layer], MicroP[layer]);
-
-                double Sdul = soilPhysical.DUL[layer] / soilPhysical.SAT[layer];
-                MacroP[layer] = Math.Log10(Kdula[layer] / 99.0 / (soilPhysical.KS[layer] - MicroKs[layer])) / Math.Log10(Sdul);
-            }
-        }
-
         private void ResetWaterBalance(int wcFlag, ref double[] waterContent)
         {
             for (int i = 0; i <= n; i++)
@@ -3199,14 +2525,14 @@ namespace Models.Soils
                     // water content was supplied in volumetric SW
                     // so calculate matric potential
                     th[i] = waterContent[i];
-                    _psi[i] = Suction(i, th[i]);
+                    _psi[i] = HP.Suction(i, th[i], _psi, PSIDul, physical.LL15, physical.DUL, physical.SAT);
                 }
                 else if (wcFlag == 2)
                 {
                     // matric potential was supplied
                     // so calculate water content
                     _psi[i] = waterContent[i];
-                    th[i] = Theta(i, _psi[i]);
+                    th[i] = CalcTheta(i, _psi[i]);
                 }
                 else
                     throw new Exception("Bad wc_type flag value");
@@ -3273,7 +2599,7 @@ namespace Models.Soils
 
         private double CalculateWaterTable()
         {
-            if (psi != null)
+            if (PSI != null)
             {
                 //   Purpose
                 //      Calculate depth of water table from soil surface
@@ -3288,93 +2614,6 @@ namespace Models.Soils
             return 0;
         }
 
-        private double Suction(int node, double theta)
-        {
-            //  Purpose
-            //   Calculate the suction for a given water content for a given node.
-            const int maxIterations = 1000;
-            const double tolerance = 1e-9;
-            const double dpsi = 0.01;
-            double psiValue;
-
-            if (theta == soilPhysical.SAT[node])
-                return 0.0;
-            else
-            {
-                //
-                if (MathUtilities.FloatsAreEqual(_psi[node], 0.0))
-                {
-                    psiValue = -100.0; // Initial estimate
-                }
-                else
-                {
-                    psiValue = _psi[node]; // Initial estimate
-                }
-                
-
-
-
-                for (int iter = 0; iter < maxIterations; iter++)
-                {
-                    double est = SimpleTheta(node, psiValue);
-                    double m = (SimpleTheta(node, psiValue + dpsi) - est) / dpsi;
-
-                    if (Math.Abs(est - theta) < tolerance)
-                        break;
-                    psiValue -= Math.Min(-dpsi,(est - theta) / m);
-                    //psiValue -= (est - theta) / m;
-                }
-                return psiValue;
-            }
-        }
-
-        private double SimpleS(int layer, double psiValue)
-        {
-            //  Purpose
-            //      Calculate S for a given node for a specified suction.
-            return SimpleTheta(layer, psiValue) / soilPhysical.SAT[layer];
-        }
-
-        private double SimpleTheta(int layer, double psiValue)
-        {
-            //  Purpose
-            //     Calculate Theta for a given node for a specified suction.
-            int i;
-            double t;
-
-            if (psiValue >= -1.0)
-            {
-                i = 0;
-                t = 0.0;
-            }
-            else if (psiValue > psid[layer])
-            {
-                i = 1;
-                t = (Math.Log10(-psiValue) - 0.0) / (Math.Log10(-psid[layer]) - 0.0);
-            }
-            else if (psiValue > psi_ll15)
-            {
-                i = 2;
-                t = (Math.Log10(-psiValue) - Math.Log10(-psid[layer])) / (Math.Log10(-psi_ll15) - Math.Log10(-psid[layer]));
-            }
-            else if (psiValue > psi0)
-            {
-                i = 3;
-                t = (Math.Log10(-psiValue) - Math.Log10(-psi_ll15)) / (Math.Log10(-psi0) - Math.Log10(-psi_ll15));
-            }
-            else
-            {
-                i = 4;
-                t = 0.0;
-            }
-
-            double tSqr = t * t;
-            double tCube = tSqr * t;
-
-            return (2 * tCube - 3 * tSqr + 1) * Y0[layer, i] + (tCube - 2 * tSqr + t) * M0[layer, i]
-                    + (-2 * tCube + 3 * tSqr) * Y1[layer, i] + (tCube - tSqr) * M1[layer, i];
-        }
-
         private void Interp(int node, double tpsi, out double tth, out double thd, out double hklg, out double hklgd)
         {
             //  Purpose
@@ -3384,40 +2623,23 @@ namespace Models.Soils
             const double dpsi = 0.0001;
             double temp;
 
-            tth = SimpleTheta(node, tpsi);
-            temp = SimpleTheta(node, tpsi + dpsi);
+            tth = HP.SimpleTheta(node, tpsi);
+            temp = HP.SimpleTheta(node, tpsi + dpsi);
             thd = (temp - tth) / Math.Log10((tpsi + dpsi) / tpsi);
-            hklg = Math.Log10(SimpleK(node, tpsi));
-            temp = Math.Log10(SimpleK(node, tpsi + dpsi));
+            hklg = Math.Log10(HP.SimpleK(node, tpsi, physical.SAT, physical.KS));
+            temp = Math.Log10(HP.SimpleK(node, tpsi + dpsi, physical.SAT, physical.KS));
             hklgd = (temp - hklg) / Math.Log10((tpsi + dpsi) / tpsi);
-        }
 
-        private double SimpleK(int layer, double psiValue)
-        {
-            //  Purpose
-            //      Calculate Conductivity for a given node for a specified suction.
-
-            double S = SimpleS(layer, psiValue);
-            double simpleK;
-
-            if (S <= 0.0)
-                simpleK = 1e-100;
-            else
+            // The above Log10 functions will produce NaNs when '(tpsi + dpsi) / tpsi' is negative.
+            // Check for this and set the values to zero if NaNs were produced.
+            if (double.IsNaN(thd))
             {
-                double microK = MicroKs[layer] * Math.Pow(S, MicroP[layer]);
-
-                if (MicroKs[layer] >= soilPhysical.KS[layer])
-                    simpleK = microK;
-                else
-                {
-                    double macroK = (soilPhysical.KS[layer] - MicroKs[layer]) * Math.Pow(S, MacroP[layer]);
-                    simpleK = microK + macroK;
-                }
+                thd = 0;
+                hklgd = 0;
             }
-            return simpleK / 24.0 / 10.0;
         }
 
-        private double Theta(int node, double suction)
+        private double CalcTheta(int node, double suction)
         {
             double theta;
             double thd;
@@ -3498,7 +2720,7 @@ namespace Models.Soils
                         }
                         qmax = Math.Max(qmax, Math.Abs(q[n + 1]));
                         if (qmax > 0.0)
-                            _dt = MathUtilities.Divide(MaxWaterIncrement, qmax, 0.0, divideTolerance);
+                            _dt = MathUtilities.Divide(MaxWaterIncrement, qmax, 0.0);
                     }
 
                     _dt = Math.Min(_dt, timestepRemaining);
@@ -3552,9 +2774,9 @@ namespace Models.Soils
 
                 double old_time = t;
 
-                //   new step
-                //40       continue
-                retry:
+            //   new step
+            //40       continue
+            retry:
 
                 t += _dt;
                 if (timestepRemaining - _dt < 0.1 * _dt)
@@ -3588,7 +2810,7 @@ namespace Models.Soils
 
                 if (fail)
                 {
-                    // SWIM failed to find a solution, should reset values to its previous state 
+                    // SWIM failed to find a solution, should reset values to its previous state
                     // and attempt to solve again with a smaller dt
 
                     ShowDiagnostics(pold);
@@ -3643,7 +2865,7 @@ namespace Models.Soils
 
                         for (int node = 0; node <= n + 1; node++)
                         {
-                            TD_sflow[solnum][node] += qsl[solnum][node] * _dt * (1e4) * (1e4) * 1e-9;
+                            solutes[solnum].Flow[node] += qsl[solnum][node] * _dt * (1e4) * (1e4) * 1e-9;
                             TD_slssof[solnum] += csl[solnum][node] * qssof[node] * _dt * (1e4) * (1e4) * 1e-9;
                         }
                     }
@@ -3720,7 +2942,7 @@ namespace Models.Soils
                 // first calculate the amount of Energy that must have been
                 // applied to reach the current g%hmin.
 
-                double decayFraction = MathUtilities.Divide(_hmin - _hm0, _hm1 - _hm0, 0.0, divideTolerance);
+                double decayFraction = MathUtilities.Divide(_hmin - _hm0, _hm1 - _hm0, 0.0);
 
                 if (MathUtilities.FloatsAreEqual(decayFraction, 0.0, floatComparisonTolerance))
                 {
@@ -3762,7 +2984,7 @@ namespace Models.Soils
                 // first calculate the amount of Energy that must have been
                 // applied to reach the current conductance.
 
-                double decayFraction = MathUtilities.Divide(gsurf - _g0, _g1 - _g0, 0.0, divideTolerance);
+                double decayFraction = MathUtilities.Divide(gsurf - _g0, _g1 - _g0, 0.0);
 
                 if (MathUtilities.FloatsAreEqual(decayFraction, 0.0, floatComparisonTolerance))
                 {
@@ -3787,20 +3009,6 @@ namespace Models.Soils
                 surfcon = gsurf;
         }
 
-        // In the Fortran version, the data for ponding water was held in
-        // array members with an index of -1.
-        // In this version, I've created this structure to hold those values.
-        // Note, however, that SWIM3 in APSIM never allowed the user to
-        // set the value for isbc, which controls the way ponding is handled;
-        // as a consequence, this version of the logic remains untested.
-        private struct PondingData
-        {
-            public double b;
-            public double c;
-            public double rhs;
-            public double v;
-        };
-
         private void Solve(int itlim, ref bool fail)
         {
             //     Short description:
@@ -3819,7 +3027,7 @@ namespace Models.Soils
             double[] rhs = new double[n + 1];
             double[] dp = new double[n + 1];
             double[] vbp = new double[n + 1];
-             PondingData pondingData = new PondingData();
+            PondingData pondingData = new PondingData();
 
             do
             {
@@ -3889,15 +3097,12 @@ namespace Models.Soils
                         _h = Math.Max(0.0, _h + pondingData.v);
                     //_h = Math.Max(0.0, _h + dp[-1]);
                 }
-
-                var msg = it + ",psi," + StringUtilities.Build(_psi, ",") + ",th," + StringUtilities.Build(th, ",");
-                summary.WriteMessage(this, msg, MessageType.Diagnostic);
             }
             while (fail && it < itlim);
 
             if (fail)
             {
-                summary.WriteMessage(this, Clock.Today.ToString("dd_mmm_yyyy"), MessageType.Diagnostic);
+                summary.WriteMessage(this, clock.Today.ToString("dd_mmm_yyyy"), MessageType.Diagnostic);
                 summary.WriteMessage(this, "Maximum iterations reached - swim will reduce timestep", MessageType.Diagnostic);
             }
 
@@ -3936,8 +3141,8 @@ namespace Models.Soils
             if (ibbc == 1)
                 // water table boundary condition
                 solute_bbc = constant_conc;
-            else if (((ibbc == 0) || (ibbc == 4)) && (q[n + 1] < 0))
-                // you have a gradient with flow upward 
+            else if (ibbc == 0 && q[n + 1] < 0)
+                // you have a gradient with flow upward
                 solute_bbc = constant_conc;
             else
                 solute_bbc = convection_only;
@@ -4013,7 +3218,10 @@ namespace Models.Soils
 
                 //Peter's CHANGE 21/10/98 to ensure zero exchange is treated as linear
                 //         if (p%fip(solnum,j).eq.1.) then
-                if ((MathUtilities.FloatsAreEqual(ex[solnum][j], 0.0, floatComparisonTolerance)) || (MathUtilities.FloatsAreEqual(fip[solnum][j], 1.0, floatComparisonTolerance)))
+                if ((MathUtilities.FloatsAreEqual(ex[solnum][j], 0.0, floatComparisonTolerance))    //exco=0
+                    || (MathUtilities.FloatsAreEqual(fip[solnum][j], 1.0, floatComparisonTolerance)) // fip=1
+
+                    ) // solute amount is zero  2022-01-06 Val Snow added this to avoid crashes when solutes initiated with zero concentraion  || (MathUtilities.FloatsAreEqual(csl[solnum][j], 0.0, 1e-6))
                 {
                     //           linear exchange isotherm
                     c2[i] = 1.0;
@@ -4030,7 +3238,7 @@ namespace Models.Soils
                     //RC         Changed by RCichota 30/jan/2010
                     exco1 = ex[solnum][j] * c2[i];
                     //            exco1=p%ex(solnum,j)*p%fip(solnum,j)*c2(i)    !<---old code
-                    //			
+                    //
                 }
                 b[i] = (-(thi + exco1) / _dt) * dx[i] - qssof[i];
                 //nh     1        apswim_slupf(1,solnum)*g%qex(i)-g%qssof(i)
@@ -4158,9 +3366,9 @@ namespace Models.Soils
             double csln = csl[solnum][n];
             neq = neq - (n - j);
             int itcnt = 0;
-            //     solve for concentrations
+        //     solve for concentrations
 
-            loop:
+        loop:
             //nh      call thomas(neq,0,a(k),b(k),c(k),rhs(k),dum,d(k),g%csl(solnum,k),
             //nh     :            dum,fail)
             double[] csltemp = new double[n + 1];
@@ -4217,7 +3425,7 @@ namespace Models.Soils
                     j = 0;
                     for (int i = 0; i <= n; i++)
                     {
-                        if (!MathUtilities.FloatsAreEqual(x[i - 1], x[i], floatComparisonTolerance))
+                        if (i > 0 && !MathUtilities.FloatsAreEqual(x[i - 1], x[i], floatComparisonTolerance))
                         {
                             if (i > 0)
                                 j++;
@@ -4245,7 +3453,7 @@ namespace Models.Soils
                             //````````````````````````````````````````````````````````````````````````````````````````````````````````````````
                             // Changes in the calc of d1 are to agree with the calc of exco1 above (no need to multiply by p%fip
                             // If p%fip < 1, the unkown is Cw, and is only used in the calc of b. thus rhs is commented out.
-                            //`	 
+                            //`
                         }
                     }
                     goto loop;
@@ -4342,7 +3550,7 @@ namespace Models.Soils
                 j = n;
                 qsl[solnum][n + 1] = qsl[solnum][n] - qsls[solnum][n] - qssof[n] * csl[solnum][n];
                 //nh     :                  -g%qex(p%n)*g%csl(solnum,p%n)*p%slupf(solnum)
-                //nh     :              -g%qex(p%n)*g%csl(solnum,p%n)*apswim_slupf(1,solnum)                 
+                //nh     :              -g%qex(p%n)*g%csl(solnum,p%n)*apswim_slupf(1,solnum)
 
                 for (int crop = 0; crop < num_crops; crop++)
                     qsl[solnum][n + 1] -= qr[n][crop] * csl[solnum][n] * Slupf(crop, solnum);
@@ -4359,11 +3567,9 @@ namespace Models.Soils
 
         private void GetSoluteVariables()
         {
-            double[] solute_n = new double[n + 1];
-
             for (int solnum = 0; solnum < num_solutes; solnum++)
             {
-                ConcWaterSolute(solnum, ref solute_n);
+                double[] solute_n = ConcWaterSolute(solnum);
                 for (int node = 0; node <= n; node++)
                     csl[solnum][node] = solute_n[node];
             }
@@ -4393,7 +3599,7 @@ namespace Models.Soils
                     if (solute_names[solnum] == flowName)
                     {
                         for (int node = 0; node <= n + 1; node++)
-                            flowArray[node] = TD_sflow[solnum][node];
+                            flowArray[node] = solutes[solnum].Flow[node];
                         flowFlag = true;
                         //flowUnits = "(kg/ha)";
                         return;
@@ -4402,14 +3608,14 @@ namespace Models.Soils
             }
         }
 
-        private void ConcWaterSolute(int solnum, ref double[] concWaterSolute)
+        private double[] ConcWaterSolute(int solnum)
         {
-            concWaterSolute = new double[n + 1]; // Init with zeroes
+            double[] concWaterSolute = new double[n + 1]; // Init with zeroes
             double[] solute_n = new double[n + 1]; // solute at each node
 
             if (solnum >= 0)
             {
-                solute_n = solutes[solnum].kgha;
+                solute_n = (double[])solutes[solnum].kgha.Clone();
 
                 for (int node = 0; node <= n; node++)
                 {
@@ -4431,7 +3637,7 @@ namespace Models.Soils
                                         solute_names[solnum],
                                         node,
                                         solute_n[node]);
-                        IssueWarning("'-ve value for solute was passed to SWIM" + mess);
+                        summary.WriteMessage(this, "'-ve value for solute was passed to SWIM" + mess, MessageType.Warning);
 
                         solute_n[node] = 0.0;
                     }
@@ -4457,9 +3663,10 @@ namespace Models.Soils
             }
             else
                 throw new Exception("You have asked apswim to use a solute that it does not know about. Number = " + solnum);
+            return concWaterSolute;
         }
 
-        private void ConcAdsorbSolute(string solname, ref double[] concAdsorbSolute)
+        private double[] ConcAdsorptionSolute(int solnum)
         {
             //+  Purpose
             //      Calculate the concentration of solute adsorbed (ug/g soil). Note that
@@ -4472,97 +3679,78 @@ namespace Models.Soils
             //+  Changes
             //     30-01-2010 - RCichota - added test for -ve values, causes a fatal error if so
 
-            concAdsorbSolute = new double[n + 1];  // init with zeroes
-            double[] solute_n = new double[n + 1]; // solute at each node
+            double[] concAdsorpSolute = new double[n + 1];  // init with zeroes
+            double[] solute_n = null; // solute at each node
 
-            int solnum = SoluteNumber(solname);
+            if (solnum >= 0)
+            {
+                for (int node = 0; node <= n; node++)
+                {
+                    solute_n = (double[])solutes[solnum].kgha.Clone();
 
-            throw new NotImplementedException(" SWIM doesn't implement ConcAdsorbSolute");
-            //if (solnum >= 0)
-            //{
-            //    // only continue if solute exists.
-            //    if (solute_owners[solnum] != 0)
-            //    {
-            //        string compName = Paddock.SiblingNameFromId(solute_owners[solnum]);
-            //        if (!My.Get(compName + "." + solname, out solute_n))
-            //            throw new Exception("No module has registered ownership for solute: " + solname);
-            //    }
+                    //````````````````````````````````````````````````````````````````````````````````
+                    //RC            Changes by RCichota, 30/Jan/2010
+                    // Note: Sometimes small numerical errors can leave -ve concentrations.
+                    // This will check for -ve or very small values being passed by other modules
+                    //  and define the appropriate response:
 
-            //    for (int node = 0; node <= n; node++)
-            //    {
+                    if (solute_n[node] < -(negative_conc_fatal))
+                    {
 
-            //        //````````````````````````````````````````````````````````````````````````````````
-            //        //RC            Changes by RCichota, 30/Jan/2010
-            //        // Note: Sometimes small numerical errors can leave -ve concentrations.
-            //        // This will check for -ve or very small values being passed by other modules
-            //        //  and define the appropriate response:
+                        string mess = String.Format("   Total {0}({1,3}) = {2,12:G6}",
+                                        solute_names[solnum],
+                                        node,
+                                        solute_n[node]);
+                        throw new Exception("-ve value for solute was passed to SWIM" + Environment.NewLine + mess);
+                    }
 
-            //        if (solute_n[node] < -(negative_conc_fatal))
-            //        {
+                    else if (solute_n[node] < -(negative_conc_warn))
+                    {
+                        string mess = String.Format("   Total {0}({1,3}) = {2,12:G6} - Value will be set to zero",
+                                        solute_names[solnum],
+                                        node,
+                                        solute_n[node]);
+                        summary.WriteMessage(this, "'-ve value for solute was passed to SWIM" + Environment.NewLine + mess, MessageType.Warning);
 
-            //            string mess = String.Format("   Total {0}({1,3}) = {2,12:G6}",
-            //                            solute_names[solnum],
-            //                            node,
-            //                            solute_n[node]);
-            //            throw new Exception("-ve value for solute was passed to SWIM" + Environment.NewLine + mess);
+                        solute_n[node] = 0.0;
+                    }
 
-            //            solute_n[node] = 0.0;
-            //        }
+                    else if (solute_n[node] < 1.0e-100)
+                    {
+                        // Value is REALLY small, no need to tell user,
+                        // set value to zero to avoid underflow with reals
 
-            //        else if (solute_n[node] < -(negative_conc_warn))
-            //        {
-            //            string mess = String.Format("   Total {0}({1,3}) = {2,12:G6} - Value will be set to zero",
-            //                            solute_names[solnum],
-            //                            node,
-            //                            solute_n[node]);
-            //            IssueWarning("'-ve value for solute was passed to SWIM" + Environment.NewLine + mess);
+                        solute_n[node] = 0.0;
+                    }
 
-            //            solute_n[node] = 0.0;
-            //        }
+                    // else Value is positive and considerable
 
-            //        else if (solute_n[node] < 1.0e-100)
-            //        {
-            //            // Value is REALLY small, no need to tell user,
-            //            // set value to zero to avoid underflow with reals
+                    //````````````````````````````````````````````````````````````````````````````````
 
-            //            solute_n[node] = 0.0;
-            //        }
+                    // convert solute from kg/ha to ug/cc soil
+                    // ug Sol    kg Sol    ug   ha(node)
+                    // ------- = ------- * -- * -------
+                    // cc soil   ha(node)  kg   cc soil
 
-            //        // else Value is positive and considerable
+                    solute_n[node] = solute_n[node]   // kg/ha
+                                * 1.0e9               // ug/kg
+                                / (dx[node] * 1.0e8); // cc soil/ha
 
-            //        //````````````````````````````````````````````````````````````````````````````````
+                    double concWaterSolute = SolveFreundlich(node, solnum, solute_n[node]);
 
-            //        // convert solute from kg/ha to ug/cc soil
-            //        // ug Sol    kg Sol    ug   ha(node)
-            //        // ------- = ------- * -- * -------
-            //        // cc soil   ha(node)  kg   cc soil
+                    //                  conc_adsorb_solute(node) =
+                    //     :              ddivide(solute_n(node)
+                    //     :                         - conc_water_solute * g%th(node)
+                    //     :                      ,p%rhob(node)
+                    //     :                      ,0d0)
 
-            //        solute_n[node] = solute_n[node]   // kg/ha
-            //                    * 1.0e9               // ug/kg
-            //                    / (dx[node] * 1.0e8); // cc soil/ha
+                    concAdsorpSolute[node] = ex[solnum][node] * Math.Pow(concWaterSolute, fip[solnum][node]);
+                }
+            }
 
-            //        double concWaterSolute = SolveFreundlich(node, solnum, solute_n[node]);
-
-            //        //                  conc_adsorb_solute(node) =
-            //        //     :              ddivide(solute_n(node)
-            //        //     :                         - conc_water_solute * g%th(node)
-            //        //     :                      ,p%rhob(node)
-            //        //     :                      ,0d0)
-
-            //        concAdsorbSolute[node] = ex[solnum][node] * Math.Pow(concWaterSolute, fip[solnum][node]);
-            //    }
-            //}
-
-            //else
-            //    throw new Exception("You have asked apswim to use a solute that it does not know about :-" + solname);
-        }
-
-        private int SoluteNumber(string solname)
-        {
-            for (int counter = 0; counter < num_solutes; counter++)
-                if (solute_names[counter] == solname)
-                    return counter;
-            return -1;
+            else
+                throw new Exception("You have asked apswim to use a solute that it does not know about.");
+            return concAdsorpSolute;
         }
 
         private double SolveFreundlich(int node, int solnum, double Ctot)
@@ -4610,7 +3798,7 @@ namespace Models.Soils
                 {
                     //There is no adsorption:
 
-                    Cw = MathUtilities.Divide(Ctot, th[node], 0.0, divideTolerance);
+                    Cw = MathUtilities.Divide(Ctot, th[node], 0.0);
                     solved = true;
                 }
 
@@ -4626,7 +3814,7 @@ namespace Models.Soils
                 {
                     // Linear adsorption:
 
-                    Cw = MathUtilities.Divide(Ctot, th[node] + ex[solnum][node], 0.0, divideTolerance);
+                    Cw = MathUtilities.Divide(Ctot, th[node] + ex[solnum][node], 0.0);
                     solved = true;
                 }
                 else
@@ -4634,7 +3822,7 @@ namespace Models.Soils
                     // Non linear isotherm:
 
                     // take initial guess for Cw
-                    Cw = Math.Pow(MathUtilities.Divide(Ctot, (th[node] + ex[solnum][node]), 0.0, divideTolerance), (1.0 / fip[solnum][node]));
+                    Cw = Math.Pow(MathUtilities.Divide(Ctot, (th[node] + ex[solnum][node]), 0.0), (1.0 / fip[solnum][node]));
                     if (Cw < 0.0)            // test added by RCichota 09/Jul/2010
                     {
                         string mess = String.Format("  {0}({1}) = {2,12:G6} - Iteration: 0",
@@ -4677,7 +3865,7 @@ namespace Models.Soils
                         {
 
                             // next value for Cw
-                            Cw = Cw - MathUtilities.Divide(error_amount, 2 * dfdCw, 0.0, divideTolerance);
+                            Cw = Cw - MathUtilities.Divide(error_amount, 2 * dfdCw, 0.0);
                             if (Cw < 0.0)             // test added by RCichota 09/Jul/2010
                             {
                                 string mess = String.Format("  {0}({1}) = {2,12:G6} - Iteration: {3}",
@@ -4858,13 +4046,13 @@ namespace Models.Soils
                 //   ---- = -------------- p%x --------
                 //   g%dt    Total daily Eo      g%dt
 
-                double start_of_day = Time(year, day, TimeToMins(apsim_time));
-                double end_of_day = Time(year, day, TimeToMins(apsim_time) + (int)apsim_timestep);
+                double start_of_day = Time(year, day, _apsimTimeMinutes);
+                double end_of_day = Time(year, day, _apsimTimeMinutes + (int)apsim_timestep);
 
                 double TD_Eo = CEvap(end_of_day) - CEvap(start_of_day);
 
                 for (int j = 0; j < nveg; j++)
-                    rtp[j] = MathUtilities.Divide(pep[j], TD_Eo, 0.0, divideTolerance) * rep;
+                    rtp[j] = MathUtilities.Divide(pep[j], TD_Eo, 0.0) * rep;
 
                 // pot soil evap rate is not linked to apsim timestep
                 tresp = sep / _dt;
@@ -4999,9 +4187,6 @@ namespace Models.Soils
 
             //     Constant Values
             const double al10 = 2.3025850929940457;
-            const double vcon1 = 7.28e-9;
-            const double vcon2 = 7.26e-7;
-
             double thd, hklg, hklgd;
 
             Trans(tp, out tpsi, out psip, out psipp);
@@ -5016,14 +4201,14 @@ namespace Models.Soils
                 hkp = (thk * hklgd * psip) / tpsi;
             }
 
-            double thsat = soilPhysical.SAT[ix];  // NOTE: this assumes that the wettest p%wc is
-                                                  //! first in the pairs of log suction vs p%wc
+            double thsat = physical.SAT[ix];  // NOTE: this assumes that the wettest p%wc is
+                                              //! first in the pairs of log suction vs p%wc
 
             // EJZ - this was in the fortran source, but is clearly futile
-            //if (thsat == 0.0)       
+            //if (thsat == 0.0)
             //    thsat = _sat[ix];
 
-            if (ivap)
+            if (VC)
             {
                 //        add vapour conductivity hkv
                 double phi = thsat / 0.93 - tth;
@@ -5102,11 +4287,6 @@ namespace Models.Soils
 
             fail = false;
         }
-
-        // Variables used only in Baleq, but which need to be saved across invocations
-        private int ifirst = 0;
-        private int ilast = 0;
-        private double gr = 0.0;
 
         private void Baleq(int it, ref int iroots, ref double[] tslos, ref double[][] tcsl, out int ibegin, out int iend, ref double[] a, ref double[] b, ref double[] c, ref double[] rhs, ref PondingData pondingData)
         {
@@ -5223,7 +4403,7 @@ namespace Models.Soils
                     w2 = 2.0 - w1;
 
                     if ((w1 > 2.0) || (w1 < 0.0))
-                        IssueWarning("bad space weighting factor");
+                        summary.WriteMessage(this, "bad space weighting factor", MessageType.Warning);
 
                     q[i] = -0.5 * (skd * deltap / deltax - gf * (w1 * hk[i - 1] + w2 * hk[i]));
                     qp1[i] = -0.5 * ((hkdp1 * deltap - skd) / deltax - gf * w1 * hkp[i - 1]);
@@ -5256,7 +4436,7 @@ namespace Models.Soils
             }
 
             //   get soil surface fluxes, taking account of top boundary condition
-            //   
+            //
             double respsi;
             double roffd;
             if (itbc == 0)
@@ -5458,13 +4638,6 @@ namespace Models.Soils
                     qp1[n + 1] = 0.0;
                 }
             }
-            else if (ibbc == 4)
-            {
-                //       flux calculated according to head difference from water table
-                double headdiff = _psi[n] - x[n] + bbc_value / 10.0;
-                q[n + 1] = headdiff * water_table_conductance;
-                qp1[n + 1] = psip[n] * water_table_conductance;
-            }
             //    get Newton-Raphson equations
             int i1 = Math.Max(ifirst, 0);
             int k = i1 - 1;
@@ -5556,9 +4729,9 @@ namespace Models.Soils
             double wt_above_drain2;
             double[] qdrain2 = new double[n + 1];
 
-            if (subsurfaceDrain != null)
+            if (subsurfaceDrain != null && subsurfaceDrain.Open)
             {
-                int drain_node = SoilUtilities.LayerIndexOfClosestDepth(soilPhysical.Thickness, subsurfaceDrain.DrainDepth);
+                int drain_node = SoilUtilities.LayerIndexOfClosestDepth(physical.Thickness, subsurfaceDrain.DrainDepth);
 
                 double d = subsurfaceDrain.ImpermDepth - subsurfaceDrain.DrainDepth;
                 if (_psi[drain_node] > 0)
@@ -5591,7 +4764,7 @@ namespace Models.Soils
 
             const double C = 1.0;                 // ratio of flux between drains to flux midway between drains.
                                                   // value of 1.0 usually used as a simplification.
-            //double q;           // flux into drains (mm/s)
+                                                  //double q;           // flux into drains (mm/s)
             double de;          // effective d to correct for convergence near the drain. (mm)
             double alpha;       // intermediate variable in de calculation
 
@@ -5609,185 +4782,5 @@ namespace Models.Soils
 
             return (8.0 * Ke * de * m + 4 * Ke * m * m) / (C * L * L);
         }
-
-        ///// <summary>
-        ///// Drains the specified qdrain.
-        ///// </summary>
-        ///// <param name="qdrain">The qdrain.</param>
-        ///// <param name="qdrainpsi">The qdrainpsi.</param>
-        //private void Drain(out double[] qdrain, out double[] qdrainpsi)
-        //{
-        //    //     Short Description:
-        //    //     gets flow rate into drain
-        //    //     All units are mm and days
-
-        //    //     Constant Values
-        //    const double dpsi = 0.01;
-
-        //    qdrain = new double[n + 1];
-        //    qdrainpsi = new double[n + 1];
-        //    double wt_above_drain;
-        //    double wt_above_drain2;
-        //    double[] qdrain2 = new double[n + 1];
-
-        //    if (SwimSubsurfaceDrain != null &&
-        //        !string.IsNullOrEmpty(subsurfaceDrain) && subsurfaceDrain.Trim() == "on")
-        //    {
-        //        int drain_node = FindLayerNo(SwimSubsurfaceDrain.DrainDepth);
-
-        //        double d = SwimSubsurfaceDrain.ImpermDepth - SwimSubsurfaceDrain.DrainDepth;
-        //        if (_psi[drain_node] > 0)
-        //            wt_above_drain = _psi[drain_node] * 10.0;
-        //        else
-        //            wt_above_drain = 0.0;
-
-        //        double q = Hooghoudt(d, wt_above_drain, SwimSubsurfaceDrain.DrainSpacing,
-        //                             SwimSubsurfaceDrain.DrainRadius, SwimSubsurfaceDrain.Klat);
-
-        //        qdrain[drain_node] = q / 10.0 / 24.0;
-
-        //        if (_psi[drain_node] + dpsi > 0.0)
-        //            wt_above_drain2 = (_psi[drain_node] + dpsi) * 10.0;
-        //        else
-        //            wt_above_drain2 = 0.0;
-
-        //        double q2 = Hooghoudt(d, wt_above_drain2, SwimSubsurfaceDrain.DrainSpacing,
-        //                              SwimSubsurfaceDrain.DrainRadius, SwimSubsurfaceDrain.Klat);
-
-        //        qdrain2[drain_node] = q2 / 10.0 / 24.0;
-
-        //        qdrainpsi[drain_node] = (qdrain2[drain_node] - qdrain[drain_node]) / dpsi;
-        //    }
-        //}
-
-
-        ///// <summary>
-        ///// Hooghoudts the specified d.
-        ///// </summary>
-        ///// <param name="d">The d.</param>
-        ///// <param name="m">The m.</param>
-        ///// <param name="L">The l.</param>
-        ///// <param name="r">The r.</param>
-        ///// <param name="Ke">The ke.</param>
-        ///// <returns></returns>
-        //private double Hooghoudt(double d, double m, double L, double r, double Ke)
-        //{
-        //    //  Purpose
-        //    //       Drainage loss to subsurface drain using Hooghoudts drainage equation. (mm/d)
-
-
-        //    const double C = 1.0;                 // ratio of flux between drains to flux midway between drains.
-        //    // value of 1.0 usually used as a simplification.
-        //    double de;          // effective d to correct for convergence near the drain. (mm)
-        //    double alpha;       // intermediate variable in de calculation
-
-        //    if (d / L <= 0)
-        //        de = 0.0;
-        //    else if (d / L < 0.3)
-        //    {
-        //        alpha = 3.55 - 1.6 * (d / L) + 2 * (d / L) * (d / L);
-        //        de = d / (1.0 + d / L * (8.0 / Math.PI * Math.Log(d / r) - alpha));
-        //    }
-        //    else
-        //    {
-        //        de = L * Math.PI / (8.0 * Math.Log(L / r) - 1.15);
-        //    }
-
-        //    return (8.0 * Ke * de * m + 4 * Ke * m * m) / (C * L * L);
-        //}
-
-        /// <summary>
-        /// Issues the warning.
-        /// </summary>
-        /// <param name="warningText">The warning text.</param>
-        private void IssueWarning(string warningText)
-        {
-            summary.WriteMessage(this, warningText, MessageType.Warning);
-        }
-
-        ///<summary>Remove water from the profile</summary>
-        public void RemoveWater(double[] dlt_sw_dep)
-        {
-            if (MathUtilities.Sum(dlt_sw_dep) > 0)
-            {
-                // convert to volumetric
-                double[] newSW = MathUtilities.Divide(dlt_sw_dep, soilPhysical.Thickness, divideTolerance);
-                newSW = MathUtilities.Subtract(th, newSW);
-                ResetWaterBalance(1, ref newSW);
-            }
-        }
-
-        ///<summary>Gets or sets soil thickness for each layer (mm)(</summary>
-        [JsonIgnore]
-        public double[] Thickness { get { return soilPhysical.Thickness; } }
-
-        /// <summary>Amount of water moving laterally out of the profile (mm)</summary>
-        [JsonIgnore]
-        public double[] LateralOutflow { get { throw new NotImplementedException("SWIM doesn't implement a LateralOutflow property"); } }
-
-        /// <summary>Amount of N leaching as NO3-N from the deepest soil layer (kg /ha)</summary>
-        [JsonIgnore]
-        public double LeachNO3 { get { throw new NotImplementedException("SWIM doesn't implement a LeachNO3 property"); } }
-
-        /// <summary>Amount of N leaching as NH4-N from the deepest soil layer (kg /ha)</summary>
-        [JsonIgnore]
-        public double LeachNH4 { get { throw new NotImplementedException("SWIM doesn't implement a LeachNH4 property"); } }
-
-        /// <summary>Amount of N leaching as urea-N  from the deepest soil layer (kg /ha)</summary>
-        [JsonIgnore]
-        public double LeachUrea { get { throw new NotImplementedException("SWIM doesn't implement a LeachUrea property"); } }
-
-        /// <summary>Amount of N leaching as NO3 from each soil layer (kg /ha)</summary>
-        [JsonIgnore]
-        public double[] FlowNO3 { get { throw new NotImplementedException("SWIM doesn't implement a FlowNO3 property"); } }
-
-        /// <summary>Amount of N leaching as NO3 from each soil layer (kg /ha)</summary>
-        [JsonIgnore]
-        public double[] FlowNH4 { get { throw new NotImplementedException("SWIM doesn't implement a FlowNH4 property"); } }
-
-        /// <summary>Amount of N leaching as urea from each soil layer (kg /ha)</summary>
-        [JsonIgnore]
-        public double[] FlowUrea { get { throw new NotImplementedException("SWIM doesn't implement a FlowUrea property"); } }
-
-        /// <summary>Amount of water moving downward out of each soil layer due to gravity drainage (above DUL) (mm)</summary>
-        [JsonIgnore]
-        public double[] Flux { get { throw new NotImplementedException("SWIM doesn't implement a Flux property"); } }
-
-        /// <summary>Loss of precipitation due in interception of surface residues (mm)</summary>
-        [JsonIgnore]
-        public double ResidueInterception
-        {
-            get { throw new NotImplementedException("SWIM doesn't implement ResidueInterception"); }
-            set { throw new NotImplementedException("SWIM doesn't implement ResidueInterception"); }
-        }
-
-        /// <summary>The efficiency (0-1) that solutes move down with water.</summary>
-        [JsonIgnore]
-        public double[] SoluteFluxEfficiency { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
-
-        /// <summary>The efficiency (0-1) that solutes move up with water.</summary>
-        [JsonIgnore]
-        public double[] SoluteFlowEfficiency { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
-
-        /// <summary>Sets the water table.</summary>
-        /// <param name="InitialDepth">The initial depth.</param>
-        public void SetWaterTable(double InitialDepth)
-        {
-            bbc_value = x[n] - InitialDepth / 10.0;
-            ibbc = 1;
-        }
-
-        ///<summary>Perform a reset</summary>
-        public void Reset()
-        {
-            throw new NotImplementedException("SWIM doesn't implement a reset method");
-        }
-
-        ///<summary>Perform tillage</summary>
-        public void Tillage(string tillageType)
-        {
-            throw new NotImplementedException("SWIM doesn't implement a tillage method");
-        }
     }
 }
-

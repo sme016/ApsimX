@@ -1,10 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Models.Core;
-using Newtonsoft.Json;
 
 namespace Models.CLEM
 {
@@ -18,17 +15,19 @@ namespace Models.CLEM
         private static WarningLog instance;
 
         /// <summary>
-        /// Obtain a static single instance of thei object
+        /// Obtain a static single instance of the object
         /// </summary>
         /// <param name="maxEntries">Maximum number of entries permitted</param>
         /// <returns>A shared WarningLog</returns>
         public static WarningLog GetInstance(int maxEntries)
         {
-            if(instance == null)
+            if (instance == null)
                 instance = new WarningLog(maxEntries);
             else
-                if(maxEntries > instance.maxCount)
+            {
+                if (maxEntries > instance.maxCount)
                     instance.maxCount = maxEntries;
+            }
 
             return instance;
         }

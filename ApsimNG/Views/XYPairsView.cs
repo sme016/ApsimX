@@ -1,17 +1,19 @@
-﻿namespace UserInterface.Views
-{
-    using Gtk;
-    using System;
+﻿using Gtk;
+using System;
+using UserInterface.Presenters;
+using Utility;
 
+namespace UserInterface.Views
+{
     /// <summary>
     /// A view that contains a graph and click zones for the user to allow
     /// editing various parts of the graph.
     /// </summary>
     public partial class XYPairsView : ViewBase
     {
-        private VPaned vpaned;
+        private Paned hpaned;
 
-        private GridView gridView;
+        private ContainerView containerView;
 
         /// <summary>
         /// Initial water graph
@@ -19,17 +21,18 @@
         private GraphView graphView;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="InitialWaterView" /> class.
+        /// Constructor
         /// </summary>
         public XYPairsView(ViewBase owner) : base(owner)
         {
-            vpaned = new VPaned();
-            mainWidget = vpaned;
-            gridView = new GridView(this);
+            hpaned = new Paned(Orientation.Horizontal);
+            hpaned.Position = GtkUtilities.GetBorderOfRightHandView(owner).Width / 6;
+            mainWidget = hpaned;
+            containerView = new ContainerView(this);
             graphView = new GraphView(this);
-            vpaned.Pack1(gridView.MainWidget, true, false);
-            vpaned.Pack2(graphView.MainWidget, true, false);
-            gridView.NumericFormat = null;
+            hpaned.Pack1(containerView.MainWidget, true, false);
+            hpaned.Pack2(graphView.MainWidget, true, false);
+            graphView.Height = 200;
             mainWidget.Destroyed += _mainWidget_Destroyed;
         }
 
@@ -60,11 +63,11 @@
         /// <summary>
         /// Gets the initial water graph.
         /// </summary>
-        public Views.GridView VariablesGrid
+        public ContainerView VariablesGrid
         {
             get
             {
-                return gridView;
+                return containerView;
             }
         }
     }

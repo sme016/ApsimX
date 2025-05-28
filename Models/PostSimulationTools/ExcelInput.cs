@@ -1,16 +1,17 @@
-﻿namespace Models.PostSimulationTools
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using APSIM.Shared.Utilities;
+using ExcelDataReader;
+using Models.Core;
+using Models.Core.Run;
+using Models.Storage;
+
+namespace Models.PostSimulationTools
 {
-    using APSIM.Shared.Utilities;
-    using ExcelDataReader;
-    using Models.Core;
-    using Models.Core.Run;
-    using Storage;
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.Globalization;
-    using System.IO;
-    using System.Linq;
 
     /// <summary>
     /// Reads the contents of a specific sheet from an EXCEL file and stores into the DataStore. 
@@ -18,8 +19,8 @@
     [Serializable]
     [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
-    [ValidParent(ParentType=typeof(DataStore))]
-    [ValidParent(ParentType=typeof(ParallelPostSimulationTool))]
+    [ValidParent(ParentType = typeof(DataStore))]
+    [ValidParent(ParentType = typeof(ParallelPostSimulationTool))]
     [ValidParent(ParentType = typeof(SerialPostSimulationTool))]
     public class ExcelInput : Model, IPostSimulationTool, IReferenceExternalFiles
     {
@@ -35,8 +36,8 @@
         /// Gets or sets the file name to read from.
         /// </summary>
         [Description("EXCEL file names")]
-        [Tooltip("Can contain more than one file name, separated by commas.")]
-        [Display(Type=DisplayType.FileNames)]
+        [Tooltip("Can contain more than one file name, each on a new line")]
+        [Display(Type = DisplayType.FileNames)]
         public string[] FileNames
         {
             get
@@ -45,11 +46,17 @@
             }
             set
             {
+                //remove any null or blank filenames that could be passed in
+                List<string> filtered = new List<string>();
+                foreach(string line in value)
+                        if (line != null && line.Length > 0)
+                            filtered.Add(line);
+
                 Simulations simulations = FindAncestor<Simulations>();
                 if (simulations != null && simulations.FileName != null && value != null)
-                    this.filenames = value.Select(v => PathUtilities.GetRelativePath(v, simulations.FileName)).ToArray();
+                    this.filenames = filtered.Select(v => PathUtilities.GetRelativePath(v, simulations.FileName)).ToArray();
                 else
-                    this.filenames = value;
+                    this.filenames = filtered.ToArray();
             }
         }
 
@@ -62,6 +69,7 @@
         /// Gets or sets the list of EXCEL sheet names to read from.
         /// </summary>
         [Description("EXCEL sheet names (csv)")]
+        [Display(Type = DisplayType.MultiLineText)]
         public string[] SheetNames
         {
             get
@@ -71,19 +79,16 @@
             set
             {
                 if (value == null)
-                    sheetNames = new string[0];
+                    sheetNames = Array.Empty<string>();
                 else
                 {
-                    string[] formattedSheetNames = new string[value.Length];
-                    for (int i = 0; i < value.Length; i++)
-                    {
-                        if (Char.IsNumber(value[i][0]))
-                            formattedSheetNames[i] = "\"" + value[i] + "\"";
-                        else
-                            formattedSheetNames[i] = value[i];
-                    }
+                    //remove any null or blank sheet names that could be passed in
+                    List<string> filtered = new List<string>();
+                    foreach(string line in value)
+                        if (line != null && line.Length > 0)
+                            filtered.Add(line);
 
-                    sheetNames = formattedSheetNames;
+                    sheetNames = filtered.ToArray();
                 }
             }
         }
@@ -140,6 +145,40 @@
                         {
                             if (SheetNames.Any(str => string.Equals(str.Trim(), table.TableName, StringComparison.InvariantCultureIgnoreCase)))
                             {
+                                //Check if any columns that only contain dates are being read in as strings (and won't graph properly because of it)
+                                List<string> replaceColumns = new List<string>();
+                                foreach (DataColumn column in table.Columns) 
+                                {
+                                    if (column.DataType == typeof(string)) {
+                                        bool isDate = true;
+                                        int count = 0;
+                                        while(isDate && count < table.Rows.Count) {
+                                            if (DateUtilities.ValidateDateStringWithYear(table.Rows[count][column.ColumnName].ToString()) == null) {
+                                                isDate = false;
+                                            }
+                                            count += 1;
+                                        }
+                                        if (isDate) {
+                                            replaceColumns.Add(column.ColumnName);
+                                        }
+                                    }
+                                }
+                                foreach (string name in replaceColumns) 
+                                {
+                                    DataColumn column = table.Columns[name];
+                                    int ordinal = column.Ordinal;
+
+                                    DataColumn newColumn = new DataColumn("NewColumn"+name, typeof(DateTime));
+                                    table.Columns.Add(newColumn);
+                                    newColumn.SetOrdinal(ordinal);
+
+                                    foreach (DataRow row in table.Rows)
+                                        row[newColumn.ColumnName] = DateUtilities.GetDate(row[name].ToString());
+
+                                    table.Columns.Remove(name);
+                                    newColumn.ColumnName = name;
+                                }
+
                                 TruncateDates(table);
 
                                 // Don't delete previous data existing in this table. Doing so would

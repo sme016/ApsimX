@@ -125,32 +125,13 @@ namespace UserInterface.Presenters
 
             // Start building table
             // apply theme based settings
-            if (!Utility.Configuration.Settings.DarkTheme)
+            if (!Utility.Configuration.Settings.ThemeRestartRequired)
             {
-                // light theme
-                htmlString = htmlString.Replace("[FontColor]", "#000000");
-                htmlString = htmlString.Replace("[GridColor]", "Black");
-                htmlString = htmlString.Replace("[WarningBackground]", "#FFFFFA");
-                htmlString = htmlString.Replace("[MessageBackground]", "#FAFAFF");
-                htmlString = htmlString.Replace("[DisabledColour]", "#cccccc");
-                htmlString = htmlString.Replace("[TableBackground]", "background-color: white;");
-                htmlString = htmlString.Replace("[ContDefaultBack]", "#FAFAFA");
-                htmlString = htmlString.Replace("[ContDefaultBanner]", "#000");
-                htmlString = htmlString.Replace("[HeaderFontColor]", "white");
-
+                htmlString = !Utility.Configuration.Settings.DarkTheme ? ModifyHTMLStyle(htmlString, false) : ModifyHTMLStyle(htmlString, true);
             }
             else
             {
-                // dark theme
-                htmlString = htmlString.Replace("[FontColor]", "#E5E5E5");
-                htmlString = htmlString.Replace("[GridColor]", "#888");
-                htmlString = htmlString.Replace("[WarningBackground]", "rgba(255, 102, 0, 0.4)");
-                htmlString = htmlString.Replace("[MessageBackground]", "rgba(100, 149, 237, 0.4)");
-                htmlString = htmlString.Replace("[DisabledColour]", "#666666");
-                htmlString = htmlString.Replace("[TableBackground]", "background-color: rgba(50, 50, 50, 0.5);");
-                htmlString = htmlString.Replace("[ContDefaultBack]", "#282828");
-                htmlString = htmlString.Replace("[ContDefaultBanner]", "#686868");
-                htmlString = htmlString.Replace("[HeaderFontColor]", "#333333");
+                htmlString = !Utility.Configuration.Settings.DarkTheme ? ModifyHTMLStyle(htmlString, true) : ModifyHTMLStyle(htmlString, false);         
             }
 
             // get CLEM Zone
@@ -164,7 +145,7 @@ namespace UserInterface.Presenters
                 htmlWriter.WriteLine("\n<span style=\"font-size:0.8em; font-weight:bold\">You will need to keep refreshing this page after changing settings and selecting the LabourAllocationsReport to see changes</span><br /><br />");
 
                 htmlWriter.Write("\n<div class=\"clearfix defaultbanner\">");
-                htmlWriter.Write($"<div class=\"namediv\">Labour allocation summary</div>");
+                htmlWriter.Write($"<div class=\"namediv\">Labour allocation summary</div><br />");
                 htmlWriter.Write($"<div class=\"typediv\">Details</div>");
                 htmlWriter.Write("</div>");
                 htmlWriter.Write("\n<div class=\"defaultcontent\">");
@@ -276,54 +257,55 @@ namespace UserInterface.Presenters
             }
         }
 
+
+
         private string TableRowHTML(IModel model)
         {
             // create row
             using (StringWriter tblstr = new StringWriter())
             {
-                // can row be included?
                 if (validpAtt.Select(a => a.ParentType).Contains(model.GetType()))
                 {
-                    LabourRequirement labourRequirement = model.FindChild<LabourRequirement>();
-                    tblstr.Write("<tr" + ((labourRequirement == null) ? " class=\"disabled\"" : "") + "><td" + ((labourRequirement == null) ? " class=\"disabled\"" : "") + ">" + model.Name + "</td>");
-
-                    // does activity have a Labour Requirement
-                    if (!(labourRequirement == null))
+                    if (model.FindAllChildren<LabourRequirement>().Any())
                     {
-                        // for each labour type
-                        foreach (LabourType lt in labourList)
+                        foreach (LabourRequirement labourRequirement in model.FindAllChildren<LabourRequirement>())
                         {
-                            tblstr.WriteLine("<td>");
-                            // for each filter group
-                            foreach (var item in labourRequirement.FindAllChildren<LabourFilterGroup>())
+                            tblstr.Write("<tr" + ((labourRequirement == null) ? " class=\"disabled\"" : "") + "><td" + ((labourRequirement == null) ? " class=\"disabled\"" : "") + ">" + model.Name + "</td>");
+                            // for each labour type
+                            foreach (LabourType lt in labourList)
                             {
-                                tblstr.Write("<div>");
-                                int level = 0;
-                                // while nested 
-                                var nested = labourRequirement.FindChild<LabourFilterGroup>();
-                                bool found = false;
-                                while (nested != null)
+                                tblstr.WriteLine("<td>");
+                                // for each filter group
+                                foreach (var item in labourRequirement.FindAllChildren<LabourGroup>())
                                 {
-                                    nested.InitialiseFilters();
-                                    level++;
-                                    if (nested.Filter(lt))
+                                    tblstr.Write("<div>");
+                                    int level = 0;
+                                    // while nested 
+                                    var nested = labourRequirement.FindChild<LabourGroup>();
+                                    bool found = false;
+                                    while (nested != null)
                                     {
-                                        found = true;
-                                        break;
+                                        nested.InitialiseFilters();
+                                        level++;
+                                        if (nested.Filter(lt))
+                                        {
+                                            found = true;
+                                            break;
+                                        }
+                                        nested.ClearRules();
+                                        nested = nested.FindAllChildren<LabourGroup>().FirstOrDefault();
                                     }
-                                    nested = nested.FindAllChildren<LabourFilterGroup>().FirstOrDefault();
+                                    if (found)
+                                        tblstr.Write($"<span class=\"dot dot{((level < 5) ? level.ToString() : "4")}\"></span>");
+                                    tblstr.Write("</div>");
                                 }
-                                if (found)
-                                    tblstr.Write($"<span class=\"dot dot{((level < 5) ? level.ToString() : "4")}\"></span>");
-                                tblstr.Write("</div>");
+                                tblstr.WriteLine("</td>");
                             }
-                            tblstr.WriteLine("</td>");
+                            tblstr.WriteLine("</tr>");
                         }
                     }
                     else
-                        tblstr.Write(CreateRowHTML("", numberLabourTypes));
-
-                    tblstr.WriteLine("</tr>");
+                        tblstr.Write($"<tr class=\"disabled\"><td class=\"disabled\">{model.Name}</td>{CreateRowHTML("", numberLabourTypes)}</tr>");
                 }
 
                 // add all rows for children
@@ -449,44 +431,45 @@ namespace UserInterface.Presenters
                 // can row be included?
                 if (validpAtt.Select(a => a.ParentType).Contains(model.GetType()))
                 {
-                    var labourRequirement = model.FindChild<LabourRequirement>();
-                    string emph = (labourRequirement == null) ? "_" : "";
-
-                    // does activity have a Labour Requirement
-                    if (!(labourRequirement == null))
+                    string emph = "_";
+                    if (model.FindAllChildren<LabourRequirement>().Any())
                     {
-                        tblstr.Write($"| {emph}{model.Name.Replace("_", " ")}{emph} |");
-                        // for each labour type
-                        foreach (LabourType lt in labourList)
+                        foreach (LabourRequirement labourRequirement in model.FindAllChildren<LabourRequirement>())
                         {
-                            // for each filter group
-                            foreach (var item in labourRequirement.FindAllChildren<LabourFilterGroup>())
+                            emph = "";
+                            tblstr.Write($"| {emph}{model.Name.Replace("_", " ")}{emph} |");
+                            // for each labour type
+                            foreach (LabourType lt in labourList)
                             {
-                                string levelstring = "";
-                                bool found = false
-;                                int level = 0;
-                                // while nested 
-                                var nested = item;
-                                while (nested != null)
+                                // for each filter group
+                                foreach (var item in labourRequirement.FindAllChildren<LabourGroup>())
                                 {
-                                    nested.InitialiseFilters();
-                                    level++;
-                                    levelstring = (level < 5) ? level.ToString() : "4";
-                                    if (nested.Filter(lt))
+                                    string levelstring = "";
+                                    bool found = false;
+                                    int level = 0;
+                                    // while nested 
+                                    var nested = item;
+                                    while (nested != null)
                                     {
-                                        found = true;
-                                        break;
+                                        nested.InitialiseFilters();
+                                        level++;
+                                        levelstring = (level < 5) ? level.ToString() : "4";
+                                        if (nested.Filter(lt))
+                                        {
+                                            found = true;
+                                            break;
+                                        }
+                                        nested.ClearRules();
+                                        nested = nested.FindChild<LabourGroup>();
                                     }
-                                    nested = nested.FindChild<LabourFilterGroup>();
+                                    tblstr.Write($" {(found ? levelstring : "0")} |");
                                 }
-                                tblstr.Write($" {(found?levelstring:"0")} |");
                             }
+                            tblstr.Write("  \n");
                         }
                     }
                     else
-                        tblstr.Write($"| {emph}{model.Name.Replace("_", " ")}{emph} | " + CreateRowMarkdown("", numberLabourTypes));
-
-                    tblstr.Write("  \n");
+                        tblstr.Write($"| {emph}{model.Name.Replace("_", " ")}{emph} | {CreateRowMarkdown("", numberLabourTypes)}  \n");
                 }
 
                 // add all rows for children
@@ -496,7 +479,6 @@ namespace UserInterface.Presenters
                 return tblstr.ToString(); 
             }
         }
-
 
         private string CreateRowMarkdown(string text, int columns)
         {
@@ -514,6 +496,39 @@ namespace UserInterface.Presenters
         /// </summary>
         public void Detach()
         {
+        }
+
+        private static string ModifyHTMLStyle(string htmlString, bool isDarkMode )
+        {
+            string reformattedHTML = htmlString;
+            if ( isDarkMode )
+            {
+                // dark theme
+                reformattedHTML = reformattedHTML.Replace("[FontColor]", "#E5E5E5");
+                reformattedHTML = reformattedHTML.Replace("[GridColor]", "#888");
+                reformattedHTML = reformattedHTML.Replace("[WarningBackground]", "rgba(255, 102, 0, 0.4)");
+                reformattedHTML = reformattedHTML.Replace("[MessageBackground]", "rgba(100, 149, 237, 0.4)");
+                reformattedHTML = reformattedHTML.Replace("[DisabledColour]", "#666666");
+                reformattedHTML = reformattedHTML.Replace("[TableBackground]", "background-color: rgba(50, 50, 50, 0.5);");
+                reformattedHTML = reformattedHTML.Replace("[ContDefaultBack]", "#282828");
+                reformattedHTML = reformattedHTML.Replace("[ContDefaultBanner]", "#686868");
+                reformattedHTML = reformattedHTML.Replace("[HeaderFontColor]", "#333333");
+            }
+            else
+            {
+                // light theme
+                reformattedHTML = reformattedHTML.Replace("[FontColor]", "#000000");
+                reformattedHTML = reformattedHTML.Replace("[GridColor]", "Black");
+                reformattedHTML = reformattedHTML.Replace("[WarningBackground]", "#FFFFFA");
+                reformattedHTML = reformattedHTML.Replace("[MessageBackground]", "#FAFAFF");
+                reformattedHTML = reformattedHTML.Replace("[DisabledColour]", "#cccccc");
+                reformattedHTML = reformattedHTML.Replace("[TableBackground]", "background-color: white;");
+                reformattedHTML = reformattedHTML.Replace("[ContDefaultBack]", "#FAFAFA");
+                reformattedHTML = reformattedHTML.Replace("[ContDefaultBanner]", "#000");
+                reformattedHTML = reformattedHTML.Replace("[HeaderFontColor]", "white");
+            }
+
+            return reformattedHTML;
         }
 
     }

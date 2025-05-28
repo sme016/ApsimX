@@ -1,10 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
-using System.Reflection;
-using Models.Core;
-using Models.PMF.Phen;
 using System.Linq;
+using Models.Core;
+using Models.PMF;
+using Models.PMF.Phen;
 
 namespace Models.Functions
 {
@@ -15,12 +14,12 @@ namespace Models.Functions
     [Description("Adds the value of all children functions to the previous day's accumulation between start and end phases")]
     [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
-    public class AccumulateByNumericPhase : Model, IFunction 
+    public class AccumulateByNumericPhase : Model, IFunction
     {
         //Class members
         /// <summary>The accumulated value</summary>
         private double AccumulatedValue = 0;
-        
+
         /// <summary>The child functions</summary>
         private IEnumerable<IFunction> ChildFunctions;
 
@@ -115,8 +114,8 @@ namespace Models.Functions
         /// <summary>Called when [cut].</summary>
         /// <param name="sender">The sender.</param>
         /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
-        [EventSubscribe("Harvesting")]
-        private void OnHarvest(object sender, EventArgs e)
+        [EventSubscribe("PostHarvesting")]
+        private void OnPostHarvesting(object sender, HarvestingParameters e)
         {
             AccumulatedValue -= FractionRemovedOnHarvest * AccumulatedValue;
         }

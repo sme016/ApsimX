@@ -1,8 +1,7 @@
-﻿using Models.Core;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+﻿using System;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Interfaces;
 using Newtonsoft.Json;
 
 namespace Models.Soils
@@ -11,7 +10,7 @@ namespace Models.Soils
     /// Returns theta and ksat values for specified psi and theta values respectively.  Gets its parameters from the soil Water node and a couple of parameters it owns
     /// </summary>
     [Serializable]
-    [ViewName("UserInterface.Views.ProfileView")]
+    [ViewName("ApsimNG.Resources.Glade.ProfileView.glade")]
     [PresenterName("UserInterface.Presenters.ProfilePresenter")]
     [ValidParent(ParentType = typeof(Soil))]
     public class HydraulicProperties : Model
@@ -90,17 +89,23 @@ namespace Models.Soils
         /// <summary>
         /// psidul
         /// </summary>
-        /// <value>
-        /// The psidul.
-        /// </value>
         [Description("The suction when the soil is at DUL")]
         [Units("cm")]
         [Bounds(Lower = -1e3, Upper = 0.0)]
         public double psidul { get; set; }
-        
+
         /// <summary>Gets or sets the thickness.</summary>
-        /// <value>The thickness.</value>
         public double[] Thickness { get; set; }
+
+        /// <summary>Depth strings. Wrapper around Thickness.</summary>
+        [Display]
+        [Units("mm")]
+        [JsonIgnore]
+        public string[] Depth
+        {
+            get => SoilUtilities.ToDepthStrings(Thickness);
+            set => Thickness = SoilUtilities.ToThickness(value);
+        }
 
         /// <summary>
         /// kdul
@@ -108,7 +113,7 @@ namespace Models.Soils
         /// <value>
         /// The kdul.
         /// </value>
-        [Description("The hydraulic conductivity when the soil is at DUL")]
+        [Display]
         [Units("mm/d")]
         public double[] kdul { get; set; }
         #endregion
@@ -237,7 +242,7 @@ namespace Models.Soils
             {
                 psid[layer] = psidul;  //- (p%x(p%n) - p%x(layer))
 
-                DELk[layer, 0] = (Water.DUL[layer] - (Water.SAT[layer]+0.000000000001)) / (Math.Log10(-psid[layer])); //Tiny amount added to Sat so in situations where DUL = SAT this function returns a non zero value
+                DELk[layer, 0] = (Water.DUL[layer] - (Water.SAT[layer] + 0.000000000001)) / (Math.Log10(-psid[layer])); //Tiny amount added to Sat so in situations where DUL = SAT this function returns a non zero value
                 DELk[layer, 1] = (Water.LL15[layer] - Water.DUL[layer]) / (Math.Log10(-psi_ll15) - Math.Log10(-psid[layer]));
                 DELk[layer, 2] = -Water.LL15[layer] / (Math.Log10(-psi0) - Math.Log10(-psi_ll15));
                 DELk[layer, 3] = -Water.LL15[layer] / (Math.Log10(-psi0) - Math.Log10(-psi_ll15));
@@ -302,6 +307,5 @@ namespace Models.Soils
             }
         }
         #endregion
-
     }
 }

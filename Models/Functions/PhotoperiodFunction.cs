@@ -1,10 +1,5 @@
 ﻿using System;
-using APSIM.Shared.Documentation;
-using System.Collections.Generic;
-using System.Text;
-
 using Models.Core;
-using APSIM.Shared.Utilities;
 using Models.Interfaces;
 
 namespace Models.Functions
@@ -30,7 +25,7 @@ namespace Models.Functions
 
         /// <summary>The clock.</summary>
         [Link]
-        protected Clock Clock = null;
+        protected IClock Clock = null;
 
         /// <summary>The twilight angle.</summary>
         [Description("Twilight angle")]
@@ -56,16 +51,6 @@ namespace Models.Functions
                 DayLength = MetData.CalculateDayLength(Twilight);
             else
                 DayLength = 0;
-        }
-
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            foreach (ITag tag in GetModelDescription())
-                yield return tag;
-            yield return new Paragraph($"*Twilight = {Twilight} (degrees)*");
         }
     }
 }

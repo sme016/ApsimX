@@ -1,21 +1,19 @@
-using Models.Core;
 using Models.CLEM.Activities;
+using Models.Core;
+using Models.Core.Attributes;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using Models.Core.Attributes;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
-using Newtonsoft.Json;
-using Models.CLEM.Resources;
 using System.IO;
+using System.Linq;
 
 namespace Models.CLEM.Groupings
 {
     ///<summary>
     /// Contains a group of filters and sorts to identify individual ruminants
-    ///</summary> 
+    ///</summary>
     [Serializable]
     [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
@@ -23,8 +21,11 @@ namespace Models.CLEM.Groupings
     [Description("Set monthly feeding values for specified individual ruminants")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Filters/Groups/RuminantFeedGroupMonthly.htm")]
-    public class RuminantFeedGroupMonthly : FilterGroup<Ruminant>, IValidatableObject
+    public class RuminantFeedGroupMonthly : RuminantFeedGroup, IValidatableObject
     {
+        [Link]
+        private IClock clock = null;
+
         /// <summary>
         /// Daily value to supply for each month
         /// </summary>
@@ -32,13 +33,18 @@ namespace Models.CLEM.Groupings
         [Required, ArrayItemCount(12)]
         public double[] MonthlyValues { get; set; }
 
+        /// <inheritdoc/>
+        public override double CurrentValue
+        {
+            get { return MonthlyValues[clock.Today.Month - 1]; }
+        }
+
         /// <summary>
         /// Constructor
         /// </summary>
         public RuminantFeedGroupMonthly()
         {
             MonthlyValues = new double[12];
-            base.ModelSummaryStyle = HTMLSummaryStyle.SubActivity;
         }
 
         #region validation
@@ -168,7 +174,7 @@ namespace Models.CLEM.Groupings
                     htmlWriter.Write("</div>");
                 }
 
-                return htmlWriter.ToString(); 
+                return htmlWriter.ToString();
             }
         }
 

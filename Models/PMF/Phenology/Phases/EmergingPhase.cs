@@ -1,18 +1,14 @@
 ﻿using System;
-using APSIM.Shared.Documentation;
-using System.Collections.Generic;
-using Models.Core;
-using Newtonsoft.Json;
-using Models.Functions;
 using APSIM.Shared.Utilities;
-using System.IO;
-using System.Text;
+using Models.Core;
+using Models.Functions;
+using Newtonsoft.Json;
 
 namespace Models.PMF.Phen
 {
     /// <summary>
-    /// This phase goes from a start stage to an end stage and simulates time to 
-    /// emergence as a function of sowing depth.  
+    /// This phase goes from a start stage to an end stage and simulates time to
+    /// emergence as a function of sowing depth.
     /// Progress toward emergence is driven by a thermal time accumulation child function.
     /// </summary>
     [Serializable]
@@ -28,23 +24,16 @@ namespace Models.PMF.Phen
         Phenology phenology = null;
 
         [Link]
-        Clock clock = null;
+        IClock clock = null;
 
         [Link]
         Plant plant = null;
 
+        [Link(Type = LinkType.Child, ByName = true)]
+        private IFunction target = null;
+
         // 2. Public properties
         //-----------------------------------------------------------------------------------------------------------------
-    
-        /// <summary>Gets or sets the lag for shoot development.</summary>
-        [Units("oCd")]
-        [Description("ShootLag")]
-        public double ShootLag { get; set; }
-
-        /// <summary>Gets or sets the shoot growth rate.</summary>
-        [Units("oCd/mm")]
-        [Description("ShootRate")]
-        public double ShootRate { get; set; }
 
         /// <summary>The phenological stage at the start of this phase.</summary>
         [Description("Start")]
@@ -53,6 +42,10 @@ namespace Models.PMF.Phen
         /// <summary>The phenological stage at the end of this phase.</summary>
         [Models.Core.Description("End")]
         public string End { get; set; }
+
+        /// <summary>Is the phase emerged from the ground?</summary>
+        [Description("Is the phase emerged?")]
+        public bool IsEmerged { get; set; } = false;
 
         /// <summary>Fraction of phase that is complete (0-1).</summary>
         [JsonIgnore]
@@ -69,7 +62,7 @@ namespace Models.PMF.Phen
 
         /// <summary>Thermal time target to end this phase.</summary>
         [JsonIgnore]
-        public double Target { get; set; } 
+        public double Target { get; set; }
 
         /// <summary>Thermal time for this time-step.</summary>
         public double TTForTimeStep { get; set; }
@@ -97,12 +90,13 @@ namespace Models.PMF.Phen
             {
                 Target = (DateUtilities.GetDate(EmergenceDate, clock.Today) - plant.SowingDate).TotalDays;
                 ProgressThroughPhase += 1;
-                if (DateUtilities.DatesEqual(EmergenceDate, clock.Today))
+                if (DateUtilities.DayMonthIsEqual(EmergenceDate, clock.Today))
                 {
                     proceedToNextPhase = true;
                 }
             }
-            else {
+            else
+            {
                 ProgressThroughPhase += TTForTimeStep;
                 if (ProgressThroughPhase > Target)
                 {
@@ -143,29 +137,8 @@ namespace Models.PMF.Phen
         [EventSubscribe("PlantSowing")]
         private void OnPlantSowing(object sender, SowingParameters data)
         {
-            Target = ShootLag + data.Depth * ShootRate;
+            Target = target.Value();
         }
 
-        /// <summary>Document the model.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // Write description of this class.
-            yield return new Paragraph($"This phase goes from {Start.ToLower()} to {End.ToLower()} and simulates time to {End.ToLower()} as a function of sowing depth. The *ThermalTime Target* for ending this phase is given by:");
-            yield return new Paragraph($"*Target* = *SowingDepth* x *ShootRate* + *ShootLag*");
-            yield return new Paragraph($"Where:");
-            yield return new Paragraph($"*ShootRate* = {ShootRate} (deg day/mm),");
-            yield return new Paragraph($"*ShootLag* = {ShootLag} (deg day), ");
-            yield return new Paragraph($"*SowingDepth* (mm) is sent from the manager with the sowing event.");
-
-            // Write memos.
-            foreach (var tag in DocumentChildren<Memo>())
-                yield return tag;
-
-            IFunction thermalTime = FindChild<IFunction>("ThermalTime");
-            yield return new Paragraph($"Progress toward emergence is driven by thermal time accumulation{(thermalTime == null ? "" : ", where thermal time is calculated as:")}");
-            if (thermalTime != null)
-                foreach (var tag in thermalTime.Document())
-                    yield return tag;
-        }
     }
 }

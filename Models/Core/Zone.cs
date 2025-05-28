@@ -1,10 +1,11 @@
-﻿namespace Models.Core
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using Models.Interfaces;
+using Newtonsoft.Json;
+
+namespace Models.Core
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Linq;
-    using Models.Interfaces;
-    using Newtonsoft.Json;
 
     /// <summary>
     /// A generic system that can have children
@@ -18,6 +19,12 @@
     [ScopedModel]
     public class Zone : Model, IZone
     {
+        /// <summary>
+        /// Link to summary, for error/warning reporting.
+        /// </summary>
+        [Link]
+        private ISummary summary = null;
+
         /// <summary>Area of the zone.</summary>
         [Description("Area of zone (ha)")]
         virtual public double Area { get; set; }
@@ -39,7 +46,7 @@
         public List<IPlant> Plants { get { return FindAllChildren<IPlant>().ToList(); } }
 
         /// <summary>Return the index of this paddock</summary>
-        public int Index {  get { return Parent.Children.IndexOf(this); } }
+        public int Index { get { return Parent.Children.IndexOf(this); } }
 
         /// <summary>Called when [simulation commencing].</summary>
         /// <param name="sender">The sender.</param>
@@ -50,6 +57,7 @@
             if (Area <= 0)
                 throw new Exception("Zone area must be greater than zero.  See Zone: " + Name);
             Validate();
+            CheckSensibility();
         }
 
         /// <summary>Gets the value of a variable or model.</summary>
@@ -57,7 +65,7 @@
         /// <returns>The found object or null if not found</returns>
         public object Get(string namePath)
         {
-            return Locator().Get(namePath, this);
+            return Locator.Get(namePath);
         }
 
         /// <summary>Get the underlying variable object for the given path.</summary>
@@ -65,7 +73,7 @@
         /// <returns>The found object or null if not found</returns>
         public IVariable GetVariableObject(string namePath)
         {
-            return Locator().GetInternal(namePath, this);
+            return Locator.GetObject(namePath);
         }
 
         /// <summary>Sets the value of a variable. Will throw if variable doesn't exist.</summary>
@@ -73,7 +81,7 @@
         /// <param name="value">The value to set the property to</param>
         public void Set(string namePath, object value)
         {
-            Locator().Set(namePath, this, value);
+            Locator.Set(namePath, value);
         }
 
         /// <summary>
@@ -88,11 +96,21 @@
         }
 
         /// <summary>
+        /// Check the sensibility of the zone. Write any warnings to the summary log.
+        /// </summary>
+        private void CheckSensibility()
+        {
+            if (FindInScope<MicroClimate>() == null)
+                summary.WriteMessage(this, "MicroClimate not found", MessageType.Warning);
+        }
+
+        /// <summary>
         /// Called when the model has been newly created in memory whether from 
         /// cloning or deserialisation.
         /// </summary>
         public override void OnCreated()
         {
+            base.OnCreated();
             Validate();
             base.OnCreated();
         }

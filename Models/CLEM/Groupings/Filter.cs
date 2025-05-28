@@ -23,9 +23,23 @@ namespace Models.CLEM.Groupings
         }
 
         /// <summary>
+        /// Constructor to apply defaults
+        /// </summary>
+        public Filter()
+        {
+            base.ModelSummaryStyle = HTMLSummaryStyle.Filter;
+        }
+
+
+        /// <summary>
         /// The filter rule
         /// </summary>
         public Func<IFilterable, bool> Rule { get; protected set; }
+
+        /// <summary>
+        /// Clear any rules created
+        /// </summary>
+        public void ClearRule() { Rule = null; }
 
         /// <summary>
         /// Filter operator
@@ -108,6 +122,14 @@ namespace Models.CLEM.Groupings
         public object Value { get; set; }
 
         /// <summary>
+        /// Modified value to use 
+        /// </summary>
+        public virtual object ModifiedValueToUse
+        {
+            get { return Value; }
+        }
+
+        /// <summary>
         /// Takes the conditions set by the user and converts them to a logical test as a lambda expression
         /// </summary>
         public abstract Func<T, bool> Compile<T>() where T:IFilterable;
@@ -116,5 +138,10 @@ namespace Models.CLEM.Groupings
         /// A method to initialise this filter
         /// </summary>
         public abstract void Initialise();
+
+        /// <summary>
+        /// A method to build rules for this filter
+        /// </summary>
+        public abstract void BuildRule();
     }
 }

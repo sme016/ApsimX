@@ -1,12 +1,12 @@
-﻿namespace UserInterface.Views
+﻿using System;
+using System.Collections.Generic;
+using System.Drawing;
+using Gtk;
+using UserInterface.Intellisense;
+using UserInterface.Interfaces;
+
+namespace UserInterface.Views
 {
-    using Gtk;
-    using Interfaces;
-    using System;
-    using System.Drawing;
-    using System.Collections.Generic;
-    using Intellisense;
-    using Extensions;
 
     /// <summary>
     /// View for a small intellisense window which displays the 
@@ -93,11 +93,11 @@
             //lblArgumentSummaries.Ellipsize = Pango.EllipsizeMode.Start;
             lblArgumentSummaries.LineWrap = true;
 
-            HBox bottomRow = new HBox();
+            Box bottomRow = new Box(Orientation.Horizontal, 0);
             bottomRow.PackStart(lblArgumentSummaries, true, true, 0);
             bottomRow.PackEnd(lblOverloadIndex, false, false, 0);
 
-            VBox container = new VBox();
+            Box container = new Box(Orientation.Vertical, 0);
             container.PackStart(lblMethodSignature, false, false, 0);
             container.PackStart(lblMethodSummary, false, false, 0);
             container.PackStart(bottomRow, false, false, 0);
@@ -112,6 +112,7 @@
                 masterWindow.FocusOutEvent += OnFocusOut;
                 masterWindow.ButtonPressEvent += OnFocusOut;
             }
+            mainWidget = mainWindow;
             Visible = false;
         }
 
@@ -303,11 +304,6 @@
             lblArgumentSummaries.Markup = System.Text.RegularExpressions.Regex.Replace(completion.ParameterDocumentation, @"^([^:]+:)", @"<b>$1</b>", System.Text.RegularExpressions.RegexOptions.Multiline);
             lblArgumentSummaries.WidthChars = Math.Max(completion.Signature.Length, completion.Summary.Length);
             lblOverloadIndex.Text = string.Format("{0} of {1}", visibleCompletionIndex + 1, completions.Count);
-        }
-
-        public void Destroy()
-        {
-            mainWindow.Dispose();
         }
     }
 }

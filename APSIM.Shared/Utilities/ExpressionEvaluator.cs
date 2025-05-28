@@ -4,13 +4,14 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using APSIM.Numerics;
 
 namespace APSIM.Shared.Utilities
 {
     /// <summary>
-    /// 
+    ///
     /// </summary>
-    public enum ExpressionType 
+    public enum ExpressionType
     {
         /// <summary>The variable</summary>
         Variable,
@@ -34,10 +35,10 @@ namespace APSIM.Shared.Utilities
         Comma,
 
         /// <summary>The error</summary>
-        Error 
+        Error
     }
     /// <summary>
-    /// 
+    ///
     /// </summary>
     [Serializable]
     public struct Symbol
@@ -58,7 +59,7 @@ namespace APSIM.Shared.Utilities
         }
     }
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <param name="name">The name.</param>
     /// <param name="args">The arguments.</param>
@@ -69,7 +70,7 @@ namespace APSIM.Shared.Utilities
     ///<date>March 23, 2002</date>
     ///<copyright>
     ///This code is Copyright to Emad Barsoum, it can be used or changed for free without removing the header
-    ///information which is the author name, email and date or refer to this information if any change made. 
+    ///information which is the author name, email and date or refer to this information if any change made.
     ///</copyright>
     ///<summary>
     ///This class <c>EvalFunction</c> use the transformation from infix notation to postfix notation to evalute most
@@ -193,11 +194,11 @@ namespace APSIM.Shared.Utilities
             int state = 1;
 
             // We iterate over the expression character by character, but a phrase
-            // or keyword such as [Clock] is one symbol. 
+            // or keyword such as [Clock] is one symbol.
             // This string builder is used to build up a keyword from the expression,
             // which is eventually stored in a symbol.
             StringBuilder temp = new StringBuilder();
-            
+
             Symbol ctSymbol = new Symbol();
             ctSymbol.m_values = null;
 
@@ -208,7 +209,7 @@ namespace APSIM.Shared.Utilities
             m_postfix.Clear();
 
             //-- Remove all white spaces from the equation string --
-            equation = equation.Replace(" ", "");
+            equation = equation.Replace(" ", "").Replace("\t", "");
 
             for (int i = 0; i < equation.Length; i++)
             {
@@ -521,7 +522,7 @@ namespace APSIM.Shared.Utilities
         /// <remarks>
         /// I give unary minus a higher precedence than multiplication, division,
         /// and exponentiation. e.g.
-        /// 
+        ///
         /// -2^4 = 16, not -16
         /// </remarks>
         protected int Precedence(Symbol sym)
@@ -953,7 +954,7 @@ namespace APSIM.Shared.Utilities
                     if (args.Length == 1)
                     {
                         result.m_value = ((Symbol)args[0]).m_value;
-                        double[] Values = ((Symbol)args[0]).m_values; 
+                        double[] Values = ((Symbol)args[0]).m_values;
                         for (int i = 0; i < Values.Length; i++)
                         {
                             if (i == 0)
@@ -1029,6 +1030,42 @@ namespace APSIM.Shared.Utilities
                         result.m_name = name;
                         result.m_values = null;
                     }
+                    else if (args.Length == 2)
+                    {
+                        if (args[0].m_values != null && args[1].m_values != null)
+                        {
+                            result.m_name = "Invalid parameters in: " + name + ". Cannot pass two arrays.";
+                            result.m_type = ExpressionType.Error;
+                        }
+                        else if (args[0].m_values != null || args[1].m_values != null)
+                        {
+                            double[] array;
+                            double value;
+                            if (args[0].m_values != null)
+                            {
+                                array = args[0].m_values;
+                                value = args[1].m_value;
+                            }
+                            else
+                            {
+                                array = args[1].m_values;
+                                value = args[0].m_value;
+                            }
+                            for (int i = 0; i < array.Length; i++)
+                            {
+                                array[i] = Math.Min(array[i], value);
+                            }
+                            result.m_value = 0;
+                            result.m_name = name;
+                            result.m_values = array;
+                        }
+                        else
+                        {
+                            result.m_value = Math.Min(args[0].m_value, args[1].m_value);
+                            result.m_name = name;
+                            result.m_values = null;
+                        }
+                    }
                     else
                     {
                         result.m_name = "Invalid number of parameters in: " + name + ".";
@@ -1043,6 +1080,42 @@ namespace APSIM.Shared.Utilities
                         result.m_value = MathUtilities.Max(Values);
                         result.m_name = name;
                         result.m_values = null;
+                    }
+                    else if (args.Length == 2)
+                    {
+                        if (args[0].m_values != null && args[1].m_values != null)
+                        {
+                            result.m_name = "Invalid parameters in: " + name + ". Cannot pass two arrays.";
+                            result.m_type = ExpressionType.Error;
+                        }
+                        else if (args[0].m_values != null || args[1].m_values != null)
+                        {
+                            double[] array;
+                            double value;
+                            if (args[0].m_values != null)
+                            {
+                                array = args[0].m_values;
+                                value = args[1].m_value;
+                            }
+                            else
+                            {
+                                array = args[1].m_values;
+                                value = args[0].m_value;
+                            }
+                            for(int i = 0; i < array.Length; i++)
+                            {
+                                array[i] = Math.Max(array[i], value);
+                            }
+                            result.m_value = 0;
+                            result.m_name = name;
+                            result.m_values = array;
+                        }
+                        else
+                        {
+                            result.m_value = Math.Max(args[0].m_value, args[1].m_value);
+                            result.m_name = name;
+                            result.m_values = null;
+                        }
                     }
                     else
                     {

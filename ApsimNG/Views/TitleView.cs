@@ -6,16 +6,6 @@ namespace UserInterface.Views
     public delegate void TitleChangedDelegate(string NewText);
 
     /// <summary>
-    /// Describes an interface for an axis view.
-    /// </summary>
-    interface ITitleView
-    {
-        event TitleChangedDelegate OnTitleChanged;
-
-        void Populate(string title);
-    }
-
-    /// <summary>
     /// A Gtk# implementation of an TitleView
     /// </summary>
     public class TitleView : ViewBase, ITitleView
@@ -24,7 +14,7 @@ namespace UserInterface.Views
 
         public event TitleChangedDelegate OnTitleChanged;
 
-        private HBox hbox1 = null;
+        private Box hbox1 = null;
         private Entry entry1 = null;
 
         /// <summary>
@@ -33,7 +23,7 @@ namespace UserInterface.Views
         public TitleView(ViewBase owner) : base(owner)
         {
             Builder builder = BuilderFromResource("ApsimNG.Resources.Glade.TitleView.glade");
-            hbox1 = (HBox)builder.GetObject("hbox1");
+            hbox1 = (Box)builder.GetObject("hbox1");
             entry1 = (Entry)builder.GetObject("entry1");
             mainWidget = hbox1;
             entry1.Changed += OnPositionComboChanged;
@@ -83,5 +73,15 @@ namespace UserInterface.Views
                 ShowError(err);
             }
         }
+    }
+
+    /// <summary>
+    /// Describes an interface for an axis view.
+    /// </summary>
+    interface ITitleView
+    {
+        event TitleChangedDelegate OnTitleChanged;
+
+        void Populate(string title);
     }
 }

@@ -1,16 +1,17 @@
 ﻿using APSIM.Cli.Options;
-using APSIM.Interop.Documentation;
-using APSIM.Interop.Documentation.Formats;
 using APSIM.Shared.Documentation;
 using APSIM.Shared.Utilities;
 using CommandLine;
 using Models.Core;
+using Models.Core.Apsim710File;
 using Models.Core.ApsimFile;
+using Models.Core.Run;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using APSIM.Documentation.Models;
 
 namespace APSIM.Cli
 {
@@ -27,9 +28,10 @@ namespace APSIM.Cli
                 {
                     config.AutoHelp = true;
                     config.HelpWriter = Console.Out;
-                }).ParseArguments<RunOptions, DocumentOptions>(args)
+                }).ParseArguments<RunOptions, DocumentOptions, ImportOptions>(args)
                 .WithParsed<RunOptions>(Run)
                 .WithParsed<DocumentOptions>(Document)
+                .WithParsed<ImportOptions>(Import)
                 .WithNotParsed(HandleParseError);
             }
             catch (Exception err)
@@ -53,7 +55,28 @@ namespace APSIM.Cli
 
         private static void Run(RunOptions options)
         {
-            throw new NotImplementedException();
+            if (options.Files == null || !options.Files.Any())
+            {
+                throw new ArgumentException($"No files were specified");
+            }
+            IEnumerable<string> files = options.Files.SelectMany(f => DirectoryUtilities.FindFiles(f, options.Recursive));
+            if (!files.Any())
+            {
+                files = options.Files;
+            }
+            foreach (string file in files)
+            {
+                Simulations sims = FileFormat.ReadFromFile<Simulations>(file, 
+                                        e => throw new Exception($"Error while trying to run {file}", e), false).NewModel as Simulations;
+
+                Runner runner = new Runner(sims);
+                List<Exception> errors = runner.Run();
+
+                if (errors != null && errors.Count > 0)
+                {
+                    throw new AggregateException("File ran with errors", errors);
+                }
+            }
         }
 
         private static void Document(DocumentOptions options)
@@ -65,7 +88,7 @@ namespace APSIM.Cli
                 files = options.Files;
             foreach (string file in files)
             {
-                Simulations sims = FileFormat.ReadFromFile<Simulations>(file, e => throw e, false);
+                Simulations sims = FileFormat.ReadFromFile<Simulations>(file, e => throw e, false).NewModel as Simulations;
                 IModel model = sims;
                 if (Path.GetExtension(file) == ".json")
                     sims.Links.Resolve(sims, true, true, false);
@@ -81,11 +104,30 @@ namespace APSIM.Cli
                         throw new Exception($"{options.Path} resolved to {value}, which is not a model");
                 }
 
-                string pdfFile = Path.ChangeExtension(file, ".pdf");
-                string directory = Path.GetDirectoryName(file);
-                PdfWriter writer = new PdfWriter(new PdfOptions(directory, null));
-                IEnumerable<ITag> tags = options.ParamsDocs ? new ParamsInputsOutputs(model).Document() : model.Document();
-                writer.Write(pdfFile, tags);
+                string htmlFile = Path.ChangeExtension(file, ".html");
+                IEnumerable<ITag> tags = options.ParamsDocs ? InterfaceDocumentation.Document(model) : AutoDocumentation.Document(model);
+                string html = APSIM.Documentation.WebDocs.TagsToHTMLString(tags.ToList());
+                File.WriteAllText(htmlFile, html);
+            }
+        }
+
+        /// <summary>
+        /// Import the files using the given options.
+        /// </summary>
+        /// <param name="options">Parsed CLI arguments.</param>
+        private static void Import(ImportOptions options)
+        {
+            if (options.Files == null || !options.Files.Any())
+                throw new ArgumentException($"No files were specified");
+
+            IEnumerable<string> files = options.Files.SelectMany(f => DirectoryUtilities.FindFiles(f, options.Recursive));
+            if (!files.Any())
+                files = options.Files;
+
+            foreach (string file in files)
+            {
+                var importer = new Importer();
+                importer.ProcessFile(file, e=> { Console.WriteLine(e.ToString()); });
             }
         }
     }

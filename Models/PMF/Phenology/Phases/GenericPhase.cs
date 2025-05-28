@@ -1,10 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
 using Models.Core;
 using Models.Functions;
-using System.IO;
 using Newtonsoft.Json;
-using APSIM.Shared.Documentation;
 
 namespace Models.PMF.Phen
 {
@@ -36,6 +33,10 @@ namespace Models.PMF.Phen
         /// <summary>The phenological stage at the end of this phase.</summary>
         [Description("End")]
         public string End { get; set; }
+
+        /// <summary>Is the phase emerged from the ground?</summary>
+        [Description("Is the phase emerged?")]
+        public bool IsEmerged { get; set; } = true;
 
         /// <summary>Fraction of phase that is complete (0-1).</summary>
         [JsonIgnore]
@@ -70,49 +71,33 @@ namespace Models.PMF.Phen
         public bool DoTimeStep(ref double propOfDayToUse)
         {
             bool proceedToNextPhase = false;
-            ProgressionForTimeStep = progression.Value() * propOfDayToUse;
-            ProgressThroughPhase += ProgressionForTimeStep;
 
-            if (ProgressThroughPhase > Target)
+            if (ProgressThroughPhase >= Target)
             {
-                if (ProgressionForTimeStep > 0.0)
-                {
-                    proceedToNextPhase = true;
-                    propOfDayToUse *= (ProgressThroughPhase - Target) / ProgressionForTimeStep;
-                    ProgressionForTimeStep *= (1 - propOfDayToUse);
-                }
-                ProgressThroughPhase = Target;
+                // We have entered this timestep after Target decrease below progress so exit without doing anything
+                proceedToNextPhase = true;
             }
-            
+            else
+            {
+                ProgressionForTimeStep = progression.Value() * propOfDayToUse;
+                ProgressThroughPhase += ProgressionForTimeStep;
+
+                if (ProgressThroughPhase > Target)
+                {
+                    if (ProgressionForTimeStep > 0.0)
+                    {
+                        proceedToNextPhase = true;
+                        propOfDayToUse *= (ProgressThroughPhase - Target) / ProgressionForTimeStep;
+                        ProgressionForTimeStep *= (1 - propOfDayToUse);
+                    }
+                    ProgressThroughPhase = Target;
+                }
+            }
             return proceedToNextPhase;
         }
 
         /// <summary>Resets the phase.</summary>
         public void ResetPhase() { ProgressThroughPhase = 0.0; }
-
-        /// <summary>Writes documentation for this function by adding to the list of documentation tags.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // Write description of this class.
-            yield return new Paragraph($"This phase goes from {Start.ToLower()} to {End.ToLower()}.");
-
-            // Write memos
-            foreach (var tag in DocumentChildren<Memo>())
-                yield return tag;
-
-            yield return new Paragraph($"The *Target* for completion is calculated as:");
-
-            // Write target
-            foreach (var tag in target.Document())
-                yield return tag;
-
-            yield return new Paragraph($"*Progression* through phase is calculated daily and accumulated until the *Target* is reached.");
-
-            // Write progression
-            foreach (var tag in progression.Document())
-                yield return tag;
-        }
-
 
         // 4. Private method
         //-----------------------------------------------------------------------------------------------------------------
@@ -126,5 +111,5 @@ namespace Models.PMF.Phen
     }
 }
 
-      
-      
+
+

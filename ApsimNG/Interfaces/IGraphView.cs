@@ -2,10 +2,10 @@
 {
     using System;
     using System.Collections;
+    using System.Collections.Generic;
     using System.Drawing;
-    using Models;
-    using EventArguments;
     using APSIM.Shared.Graphing;
+    using EventArguments;
 
     /// <summary>
     /// Event arguments for a Axis click
@@ -47,11 +47,6 @@
         /// Invoked when the user clicks on the graph caption.
         /// </summary>
         event EventHandler OnCaptionClick;
-
-        /// <summary>
-        /// Invoked when the user hovers over a series point.
-        /// </summary>
-        event EventHandler<HoverPointArgs> OnHoverOverPoint;
 
         /// <summary>
         /// Invoked when the user clicks on the annotation.
@@ -109,16 +104,17 @@
         /// <param name="markerSize">The size of the marker</param>
         /// <param name="markerModifier">Marker size multiplier.</param>
         /// <param name="showInLegend">Show in legend?</param>
+        /// <param name="caption">A string for each point that shows up in the tracker caption</param>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("StyleCop.CSharp.NamingRules", "SA1305:FieldNamesMustNotUseHungarianNotation", Justification = "Reviewed.")]
         void DrawLineAndMarkers(
-             string title, 
-             IEnumerable x, 
+             string title,
+             IEnumerable x,
              IEnumerable y,
              string xFieldName,
              string yFieldName,
              IEnumerable xError,
              IEnumerable yError,
-             AxisPosition xAxisType, 
+             AxisPosition xAxisType,
              AxisPosition yAxisType,
              Color colour,
              LineType lineType,
@@ -126,7 +122,8 @@
              LineThickness lineThickness,
              MarkerSize markerSize,
              double markerModifier,
-             bool showInLegend);
+             bool showInLegend,
+             IEnumerable caption = null);
 
         /// <summary>
         /// Draw a bar series with the specified arguments.
@@ -140,11 +137,11 @@
         /// <param name="showInLegend">Show this series in the legend?</param>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("StyleCop.CSharp.NamingRules", "SA1305:FieldNamesMustNotUseHungarianNotation", Justification = "Reviewed.")]
         void DrawBar(
-            string title, 
-            IEnumerable x, 
-            IEnumerable y, 
-            AxisPosition xAxisType, 
-            AxisPosition yAxisType, 
+            string title,
+            IEnumerable x,
+            IEnumerable y,
+            AxisPosition xAxisType,
+            AxisPosition yAxisType,
             Color colour,
             bool showInLegend);
 
@@ -303,21 +300,25 @@
         /// <param name="maximum">Maximum axis scale</param>
         /// <param name="interval">Axis scale interval</param>
         /// <param name="crossAtZero">Axis crosses at zero?</param>
+        /// <param name="labelOnOneLine">Show Axis Label on one line</param>
         void FormatAxis(
-            AxisPosition axisType, 
+            AxisPosition axisType,
             string title,
             bool inverted,
             double minimum,
             double maximum,
             double interval,
-            bool crossAtZero);
+            bool crossAtZero,
+            bool labelOnOneLine);
 
         /// <summary>
         /// Format the legend.
         /// </summary>
         /// <param name="position">Position of the legend</param>
         /// <param name="orientation">Orientation of items in the legend.</param>
-        void FormatLegend(LegendPosition position, LegendOrientation orientation);
+        /// <param name="namesOfSeriesToRemove">Names of series to remove from Graph.</param>
+        /// <param name="reselectedSeriesNames">Names of reselected series to be reenabled.</param>
+        void FormatLegend(LegendPosition position, LegendOrientation orientation, List<string> namesOfSeriesToRemove=null, List<string> reselectedSeriesNames=null);
 
         /// <summary>
         /// Format the title.
@@ -338,7 +339,7 @@
         /// <param name="bitmap">Bitmap to write to</param>
         /// <param name="r">Desired bitmap size.</param>
         /// <param name="legendOutside">Put legend outside of graph?</param>
-        void Export(ref Bitmap bitmap, Rectangle r, bool legendOutside);
+        void Export(out Gdk.Pixbuf bitmap, Rectangle r, bool legendOutside);
 
         /// <summary>
         /// Export the graph to the clipboard
@@ -375,7 +376,7 @@
         /// Gets the interval (major step) of the specified axis.
         /// </summary>
         double AxisMajorStep(AxisPosition axisType);
-        
+
         /// <summary>Gets the series names.</summary>
         /// <returns></returns>
         string[] GetSeriesNames();

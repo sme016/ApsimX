@@ -1,8 +1,8 @@
-﻿using APSIM.Shared.Utilities;
+﻿using System;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
 using MathNet.Numerics;
 using MathNet.Numerics.LinearRegression;
-using System;
-using System.Linq;
 
 namespace Models.Utilities
 {

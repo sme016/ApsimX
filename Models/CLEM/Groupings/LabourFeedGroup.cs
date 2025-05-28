@@ -1,13 +1,8 @@
-﻿using Models.Core;
-using Models.CLEM.Activities;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using Models.Core.Attributes;
-using System.ComponentModel.DataAnnotations;
+﻿using Models.CLEM.Activities;
 using Models.CLEM.Resources;
-using Newtonsoft.Json;
+using Models.Core;
+using Models.Core.Attributes;
+using System;
 using System.IO;
 
 namespace Models.CLEM.Groupings
@@ -22,7 +17,7 @@ namespace Models.CLEM.Groupings
     [Description("Defines the feed value for specific individuals from the labour pool")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Filters/Groups/LabourFeedGroup.htm")]
-    public class LabourFeedGroup : FilterGroup<LabourType>
+    public class LabourFeedGroup : LabourGroup
     {
         /// <summary>
         /// Value to supply for each month
@@ -58,7 +53,7 @@ namespace Models.CLEM.Groupings
                 {
                     case LabourFeedActivityTypes.SpecifiedDailyAmountPerAE:
                     case LabourFeedActivityTypes.SpecifiedDailyAmountPerIndividual:
-                        htmlWriter.Write("<span class=\"" + ((Value <= 0) ? "errorlink" : "setvalue") + "\">" + Value.ToString() + "</span>");
+                        htmlWriter.Write($"<span class=\"{((Value <= 0) ? "errorlink" : "setvalue")}\">{Value}</span>");
                         break;
                     default:
                         break;
@@ -93,7 +88,7 @@ namespace Models.CLEM.Groupings
                 htmlWriter.Write(" that matches the following conditions:");
 
                 htmlWriter.Write("</div>");
-                return htmlWriter.ToString(); 
+                return htmlWriter.ToString();
             }
         }
 

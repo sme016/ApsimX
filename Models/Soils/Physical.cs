@@ -1,22 +1,34 @@
-﻿namespace Models.Soils
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using APSIM.Numerics;
+using APSIM.Shared.APSoil;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Core.ApsimFile;
+using Models.Factorial;
+using Models.Interfaces;
+using Models.Utilities;
+using Newtonsoft.Json;
+
+namespace Models.Soils
 {
-    using APSIM.Shared.APSoil;
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using System;
-    using System.Linq;
 
     /// <summary>A model for capturing physical soil parameters</summary>
     [Serializable]
-    [ViewName("UserInterface.Views.ProfileView")]
+    [ViewName("ApsimNG.Resources.Glade.ProfileView.glade")]
     [PresenterName("UserInterface.Presenters.ProfilePresenter")]
     [ValidParent(ParentType = typeof(Soil))]
     public class Physical : Model, IPhysical
     {
+        // Water node.
+        private Water waterNode = null;
+
         /// <summary>Depth strings. Wrapper around Thickness.</summary>
-        [Description("Depth")]
-        [Units("cm")]
+        [Display]
+        [Units("mm")]
         [Summary]
+        [JsonIgnore]
         public string[] Depth
         {
             get
@@ -56,27 +68,27 @@
         [Units("mm")]
         public double[] Thickness { get; set; }
 
-        /// <summary>Particle size clay.</summary>
-        [Summary]
-        [Description("Clay")]
-        [Units("%")]
-        public double[] ParticleSizeClay { get; set; }
-
         /// <summary>Particle size sand.</summary>
         [Summary]
-        [Description("Sand")]
+        [Display(DisplayName = "Sand", Format = "N3")]
         [Units("%")]
         public double[] ParticleSizeSand { get; set; }
 
         /// <summary>Particle size silt.</summary>
         [Summary]
-        [Description("Silt")]
+        [Display(DisplayName = "Silt", Format = "N3")]
         [Units("%")]
         public double[] ParticleSizeSilt { get; set; }
 
+        /// <summary>Particle size clay.</summary>
+        [Summary]
+        [Display(DisplayName = "Clay", Format = "N3")]
+        [Units("%")]
+        public double[] ParticleSizeClay { get; set; }
+
         /// <summary>Rocks.</summary>
         [Summary]
-        [Description("Rocks")]
+        [Display(Format = "N3")]
         [Units("%")]
         public double[] Rocks { get; set; }
 
@@ -85,23 +97,20 @@
 
         /// <summary>Bulk density (g/cc).</summary>
         [Summary]
-        [Description("BD")]
         [Units("g/cc")]
-        [Display(Format = "N2")]
+        [Display(Format = "N3")]
         public double[] BD { get; set; }
 
         /// <summary>Air dry - volumetric (mm/mm).</summary>
         [Summary]
-        [Description("Air dry")]
         [Units("mm/mm")]
-        [Display(Format = "N2")]
+        [Display(Format = "N3")]
         public double[] AirDry { get; set; }
 
         /// <summary>Lower limit 15 bar (mm/mm).</summary>
         [Summary]
-        [Description("LL15")]
         [Units("mm/mm")]
-        [Display(Format = "N2")]
+        [Display(Format = "N3")]
         public double[] LL15 { get; set; }
 
         /// <summary>Return lower limit limit at standard thickness. Units: mm</summary>
@@ -110,9 +119,8 @@
 
         /// <summary>Drained upper limit (mm/mm).</summary>
         [Summary]
-        [Description("DUL")]
         [Units("mm/mm")]
-        [Display(Format = "N2")]
+        [Display(Format = "N3")]
         public double[] DUL { get; set; }
 
         /// <summary>Drained upper limit (mm).</summary>
@@ -121,20 +129,35 @@
 
         /// <summary>Saturation (mm/mm).</summary>
         [Summary]
-        [Description("SAT")]
         [Units("mm/mm")]
-        [Display(Format = "N2")]
+        [Display(Format = "N3")]
         public double[] SAT { get; set; }
 
         /// <summary>Saturation (mm).</summary>
         [Units("mm")]
         public double[] SATmm { get { return MathUtilities.Multiply(SAT, Thickness); } }
 
+        /// <summary>Initial soil water (mm/mm).</summary>
+        [Summary]
+        [Units("mm/mm")]
+        [Display(Format = "N3")]
+        [JsonIgnore]
+        public double[] SW
+        {
+            get
+            {
+                return SoilUtilities.MapConcentration(WaterNode.InitialValues, WaterNode.Thickness, Thickness, 0);
+            }
+        }
+
+        /// <summary>Initial soil water (mm).</summary>
+        [Units("mm")]
+        public double[] SWmm { get { return MathUtilities.Multiply(SW, Thickness); } }
+
         /// <summary>KS (mm/day).</summary>
         [Summary]
-        [Description("KS")]
         [Units("mm/day")]
-        [Display(Format = "N1")]
+        [Display(Format = "N3")]
         public double[] KS { get; set; }
 
         /// <summary>Plant available water CAPACITY (DUL-LL15).</summary>
@@ -143,7 +166,6 @@
 
         /// <summary>Plant available water CAPACITY (DUL-LL15).</summary>
         [Units("mm")]
-        [Display(Format = "N0", ShowTotal = true)]
         public double[] PAWCmm { get { return MathUtilities.Multiply(PAWC, Thickness); } }
 
         /// <summary>Gets or sets the bd metadata.</summary>
@@ -179,5 +201,23 @@
         /// <summary>Particle size clay metadata.</summary>
         public string[] ParticleSizeClayMetadata { get; set; }
 
+
+
+        private Water WaterNode
+        {
+            get
+            {
+                if (waterNode == null)
+                    waterNode = FindInScope<Water>();
+                if (waterNode == null)
+                    waterNode = FindAncestor<Experiment>().FindAllChildren<Simulation>().First().FindDescendant<Water>();
+                if (waterNode == null)
+                    throw new Exception("Cannot find water node in simulation");
+                return waterNode;
+            }
+        }
+
+        /// <summary>Is SW from the water node in the same layer structure?</summary>
+        private bool IsSWSameLayerStructure => MathUtilities.AreEqual(Thickness, WaterNode.Thickness);
     }
 }

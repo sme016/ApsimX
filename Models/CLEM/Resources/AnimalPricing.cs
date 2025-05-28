@@ -1,13 +1,10 @@
-﻿using Models.Core;
-using Models.CLEM.Activities;
-using Models.CLEM.Resources;
+﻿using Models.CLEM.Groupings;
+using Models.Core;
+using Models.Core.Attributes;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
-using Models.CLEM.Groupings;
-using Models.Core.Attributes;
 
 namespace Models.CLEM.Resources
 {
@@ -18,12 +15,13 @@ namespace Models.CLEM.Resources
     [ViewName("UserInterface.Views.PropertyMultiModelView")]
     [PresenterName("UserInterface.Presenters.PropertyMultiModelPresenter")]
     [ValidParent(ParentType = typeof(RuminantType))]
+    [ValidParent(ParentType = typeof(OtherAnimalsType))]
     [Description("Holds all animal price entries defining the value of individual ruminants")]
     [Version(1, 0, 1, "Beta build")]
     [Version(1, 0, 2, "Custom grouping with filtering")]
     [Version(1, 0, 3, "Purchase and sales identifier used")]
     [HelpUri(@"Content/Features/Resources/Ruminants/AnimalPricing.htm")]
-    public class AnimalPricing: CLEMModel, IValidatableObject
+    public class AnimalPricing : CLEMModel, IValidatableObject
     {
         /// <summary>
         /// Constructor
@@ -84,7 +82,7 @@ namespace Models.CLEM.Resources
                 html += "<span class=\"errorlink\">No Animal Price Groups defined!</span>";
 
             return html;
-        } 
+        }
         #endregion
 
     }

@@ -1,13 +1,10 @@
 ﻿using Models.CLEM.Resources;
 using Models.Core;
 using Models.Core.Attributes;
+using Newtonsoft.Json;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
 
 namespace Models.CLEM.Groupings
 {
@@ -47,18 +44,7 @@ namespace Models.CLEM.Groupings
             if (!FormatForParentControl)
             {
                 html += "\r\n<div class=\"activityentry\">";
-                html += "Pay ";
-                if (Value.ToString() == "0")
-                {
-                    html += "<span class=\"errorlink\">NOT SET";
-                }
-                else
-                {
-                    html += "<span class=\"setvalue\">";
-                    html += Value.ToString("#,0.##");
-                }
-                html += "</span> for a days work";
-                html += "</div>";
+                html += $"Pay {CLEMModel.DisplaySummaryValueSnippet(Value, warnZero: true)} for a days work</div>";
             }
             return html;
         }
@@ -69,16 +55,7 @@ namespace Models.CLEM.Groupings
             string html = "";
             if (FormatForParentControl)
             {
-                if (Value.ToString() == "0")
-                {
-                    html += "</td><td><span class=\"errorlink\">NOT SET";
-                }
-                else
-                {
-                    html += "</td><td><span class=\"setvalue\">";
-                    html += this.Value.ToString("#,0.##");
-                }
-                html += "</span></td>";
+                html += $"</td><td>{CLEMModel.DisplaySummaryValueSnippet(Value, warnZero: true)}</td>";
                 html += "</tr>";
             }
             else
@@ -92,10 +69,10 @@ namespace Models.CLEM.Groupings
         public override string ModelSummaryInnerOpeningTags()
         {
             string html = "";
-            if (FormatForParentControl)            
+            if (FormatForParentControl)
                 html += "<tr><td>" + this.Name + "</td><td>";
-            else            
-                html += "\r\n<div class=\"filterborder clearfix\">";            
+            else
+                html += "\r\n<div class=\"filterborder clearfix\">";
 
             if (FindAllChildren<Filter>().Count() < 1)
                 html += "<div class=\"filter\">All individuals</div>";
@@ -113,7 +90,7 @@ namespace Models.CLEM.Groupings
         public override string ModelSummaryOpeningTags()
         {
             return !FormatForParentControl ? base.ModelSummaryOpeningTags() : "";
-        } 
+        }
         #endregion
     }
 }

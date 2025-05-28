@@ -1,10 +1,11 @@
-using System;
-using System.Globalization;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
 using Models.CLEM.Groupings;
 using Models.CLEM.Interfaces;
 using Models.CLEM.Reporting;
-using Newtonsoft.Json;
-using Models.Core;
+using System;
+using System.Collections.Generic;
+using System.Globalization;
 
 namespace Models.CLEM.Resources
 {
@@ -19,6 +20,7 @@ namespace Models.CLEM.Resources
         private double age;
         private double normalisedWeight;
         private double adultEquivalent;
+        private int weaned = 0;
 
         /// <summary>
         /// Get the value to use for the transaction style requested
@@ -34,7 +36,7 @@ namespace Models.CLEM.Resources
                 case RuminantTransactionsGroupingStyle.Combined:
                     return "All";
                 case RuminantTransactionsGroupingStyle.ByPriceGroup:
-                    return BreedParams.ValueofIndividual(this, pricingStyle).Name;
+                    return BreedParams.GetPriceGroupOfIndividual(this, pricingStyle)?.Name ?? $"{pricingStyle}NotSet";
                 case RuminantTransactionsGroupingStyle.ByClass:
                     return this.Class;
                 case RuminantTransactionsGroupingStyle.BySexAndClass:
@@ -46,9 +48,9 @@ namespace Models.CLEM.Resources
         }
 
         /// <summary>
-        /// Current animal price group for this individual 
+        /// Current animal price group for this individual
         /// </summary>
-        public AnimalPriceGroup CurrentPrice { get; set; } = null;
+        public (AnimalPriceGroup Buy, AnimalPriceGroup Sell) CurrentPriceGroups { get; set; } = (null, null);
 
         /// <inheritdoc/>
         public IndividualAttributeList Attributes { get; set; } = new IndividualAttributeList();
@@ -99,10 +101,21 @@ namespace Models.CLEM.Resources
         public int MotherID { get; private set; }
 
         /// <summary>
+        /// Individual is suckling, still with mother and not weaned
+        /// </summary>
+        public bool IsSucklingWithMother { get { return weaned == 0 && mother != null; } }
+
+        /// <summary>
         /// Sex of individual
         /// </summary>
         [FilterByProperty]
         public abstract Sex Sex { get; }
+
+        /// <summary>
+        /// Has the individual been sterilised (webbed, spayed or castrated)
+        /// </summary>
+        [FilterByProperty]
+        public abstract bool IsSterilised { get; }
 
         /// <summary>
         /// Marked as a replacement breeder
@@ -125,6 +138,45 @@ namespace Models.CLEM.Resources
             {
                 age = value;
                 normalisedWeight = CalculateNormalisedWeight(age);
+            }
+        }
+
+        /// <summary>
+        /// Age (Years)
+        /// </summary>
+        /// <units>Years</units>
+        [FilterByProperty]
+        public double AgeInYears
+        {
+            get
+            {
+                return age / 12.0;
+            }
+        }
+
+        /// <summary>
+        /// Age (whole years)
+        /// </summary>
+        /// <units>Whole years</units>
+        [FilterByProperty]
+        public int AgeInWholeYears
+        {
+            get
+            {
+                return Convert.ToInt32(Math.Floor(age / 12.0));
+            }
+        }
+
+        /// <summary>
+        /// Growth Rate (daily)
+        /// </summary>
+        /// <units>kg day-1</units>
+        [FilterByProperty]
+        public double GrowthRate
+        {
+            get
+            {
+                return (Weight - (BreedParams.SRWBirth * BreedParams.SRWFemale))/ Math.Max(1.0, age*30.4);
             }
         }
 
@@ -161,6 +213,18 @@ namespace Models.CLEM.Resources
         /// <units>Months</units>
         [FilterByProperty]
         public double PurchaseAge { get; set; }
+
+        /// <summary>
+        /// Number of months since purchased
+        /// </summary>
+        [FilterByProperty]
+        public int MonthsSincePurchase
+        {
+            get
+            {
+                return Convert.ToInt32(Math.Round(Age - PurchaseAge, 4));
+            }
+        }
 
         /// <summary>
         /// Weight (kg)
@@ -257,16 +321,19 @@ namespace Models.CLEM.Resources
         {
             get
             {
-                double result = 0;
-                double min = BreedParams.ProportionOfMaxWeightToSurvive * HighWeight;
-                double mid = NormalisedAnimalWeight;
-                double max = BreedParams.MaximumSizeOfIndividual;
+                throw new NotImplementedException("The Ruminant.HealthScore property is depeciated. Please use Body Condition Score.");
+            }
+        }
 
-                if(weight < mid)
-                    result = Math.Round((mid - Math.Max(min, weight)) / ((mid - min) / 2.5)) * -1;
-                else if (weight > mid)
-                    result = Math.Round((weight - mid) / ((max - mid) / 2.5));
-                return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+        /// <summary>
+        /// A label combining sex and class for reporting
+        /// </summary>
+        [FilterByProperty]
+        public string SexAndClass
+        {
+            get
+            {
+                return $"{Sex}.{Class}";
             }
         }
 
@@ -278,25 +345,31 @@ namespace Models.CLEM.Resources
         {
             get
             {
-                if(this.IsCalf)
-                    return "Calf";
-                else if(this.IsWeaner)
+                if (this.IsSuckling)
+                    return "Suckling";
+                else if (this.IsWeaner)
                     return "Weaner";
                 else
                 {
-                    if(this is RuminantFemale)
-                        if ((this as RuminantFemale).IsPreBreeder)
+                    if (this is RuminantFemale female)
+                    {
+                        if (female.IsPreBreeder)
                             return "PreBreeder";
-                        else
+                        else if (female.IsBreeder)
                             return "Breeder";
+                        else
+                            return "Sterilized";
+                    }
                     else
-                        if((this as RuminantMale).IsSire)
+                    {
+                        var male = this as RuminantMale;
+                        if (male.IsSire)
                             return "Sire";
-                        else if((this as RuminantMale).IsCastrated)
+                        else if (male.IsCastrated)
                             return "Castrate";
                         else
                         {
-                            if((this as RuminantMale).IsWildBreeder)
+                            if (male.IsWildBreeder)
                             {
                                 return "Breeder";
                             }
@@ -305,6 +378,7 @@ namespace Models.CLEM.Resources
                                 return "PreBreeder";
                             }
                         }
+                    }
                 }
             }
         }
@@ -335,19 +409,19 @@ namespace Models.CLEM.Resources
         {
             get
             {
-                return (Weaned && Age<12);
+                return (Weaned && Age < 12);
             }
         }
 
         /// <summary>
-        /// Determine if weaned and less that 12 months old. Weaner
+        /// Determine if unweaned suckling
         /// </summary>
         [FilterByProperty]
-        public bool IsCalf
+        public bool IsSuckling
         {
             get
             {
-                return (!Weaned);
+                return !Weaned;
             }
         }
 
@@ -395,10 +469,21 @@ namespace Models.CLEM.Resources
         {
             get
             {
-                if (PotentialIntake + MilkPotentialIntake > 0)
-                    return (Intake + MilkIntake) / (PotentialIntake + MilkPotentialIntake);
+                if (MilkPotentialIntake > 0)
+                {
+                    double prop = (MilkIntake / MilkPotentialIntake);
+                    if (MathUtilities.IsGreaterThanOrEqual(PotentialIntake, 0.0))
+                    {
+                        prop += (1 - (MilkIntake / MilkPotentialIntake)) * (Intake / PotentialIntake);
+                    }
+                    return prop;
+                }
                 else
-                    return 0;
+                {
+                    if (MathUtilities.IsGreaterThanOrEqual(PotentialIntake, 0.0))
+                        return Intake / PotentialIntake;
+                }
+                return 0;
             }
         }
 
@@ -418,7 +503,7 @@ namespace Models.CLEM.Resources
         /// Flag to identify individual ready for sale
         /// </summary>
         [FilterByProperty]
-        public HerdChangeReason SaleFlag { get; set; }
+        public HerdChangeReason SaleFlag { get; set; } = HerdChangeReason.None;
 
         /// <summary>
         /// Determines if the change reason is positive or negative
@@ -444,6 +529,7 @@ namespace Models.CLEM.Resources
                     case HerdChangeReason.DestockSale:
                     case HerdChangeReason.ReduceInitialHerd:
                     case HerdChangeReason.MarkedSale:
+                    case HerdChangeReason.WeanerSale:
                         return -1;
                     case HerdChangeReason.Born:
                     case HerdChangeReason.TradePurchase:
@@ -533,7 +619,7 @@ namespace Models.CLEM.Resources
         {
             get
             {
-                return NormalisedAnimalWeight/StandardReferenceWeight;
+                return NormalisedAnimalWeight / StandardReferenceWeight;
             }
         }
 
@@ -551,45 +637,90 @@ namespace Models.CLEM.Resources
         }
 
         /// <summary>
+        /// Body condition score
+        /// </summary>
+        [FilterByProperty]
+        public double BodyConditionScore
+        {
+            get
+            {
+                double bcscore = BreedParams.BCScoreRange[1] + (RelativeCondition - 1) / BreedParams.RelBCToScoreRate;
+                return Math.Max(BreedParams.BCScoreRange[0], Math.Min(bcscore, BreedParams.BCScoreRange[2]));
+            }
+        }
+
+        /// <summary>
+        /// Method called on offspring when mother is lost (e.g. dies or sold)
+        /// </summary>
+        public void MotherLost()
+        {
+            if (Mother != null)
+            {
+                Mother.SucklingOffspringList.Remove(this);
+                Mother = null;
+            }
+        }
+
+        /// <summary>
         /// Wean this individual
         /// </summary>
         public void Wean(bool report, string reason)
         {
-            weaned = true;
-            if (this.Mother != null)
+            weaned = Convert.ToInt32(Math.Round(Age, 3), CultureInfo.InvariantCulture);
+            if (weaned > Math.Ceiling(BreedParams.GestationLength))
+                weaned = Convert.ToInt32(Math.Ceiling(BreedParams.GestationLength));
+
+            if (Mother != null)
             {
-                this.Mother.SucklingOffspringList.Remove(this);
-                this.Mother.NumberOfWeaned++;
+                Mother.SucklingOffspringList.Remove(this);
+                Mother.NumberOfWeaned++;
             }
             if (report)
             {
+                RuminantReportItemEventArgs args = new RuminantReportItemEventArgs
                 {
-                    RuminantReportItemEventArgs args = new RuminantReportItemEventArgs
-                    {
-                        RumObj = this,
-                        Category = reason
-                    };
-                    (this.BreedParams.Parent as RuminantHerd).OnWeanOccurred(args);
-                }
+                    RumObj = this,
+                    Category = reason
+                };
+                (this.BreedParams.Parent as RuminantHerd).OnWeanOccurred(args);
             }
 
         }
-
-        private bool weaned = true;
 
         /// <summary>
         /// Method to set the weaned status to unweaned for new born individuals.
         /// </summary>
         public void SetUnweaned()
         {
-            weaned = false;
+            weaned = 0;
         }
 
         /// <summary>
         /// Weaned individual flag
         /// </summary>
         [FilterByProperty]
-        public bool Weaned { get { return weaned; } }
+        public bool Weaned { get { return weaned > 0; } }
+
+        /// <summary>
+        /// Weaned individual flag
+        /// </summary>
+        [FilterByProperty]
+        public bool IsWeaned { get { return weaned > 0; } }
+
+        /// <summary>
+        /// Number of months since weaned
+        /// </summary>
+        [FilterByProperty]
+        public int MonthsSinceWeaned
+        {
+            get
+            {
+                if (weaned > 0)
+                    return Convert.ToInt32(Math.Round(Age - weaned, 4));
+                else
+                    return 0;
+            }
+        }
 
         /// <summary>
         /// Milk production currently available from mother
@@ -670,7 +801,10 @@ namespace Models.CLEM.Resources
             this.Number = 1;
             this.Wool = 0;
             this.Cashmere = 0;
-            this.weaned = true;
+            int ageInt = Convert.ToInt32(Math.Round(Age, 4));
+            int weanage = Convert.ToInt32(Math.Round((BreedParams.NaturalWeaningAge == 0) ? BreedParams.GestationLength : BreedParams.NaturalWeaningAge, 4));//   Convert.ToInt32(Math.Round(BreedParams.GestationLength, 4));
+            //this.weaned = (ageInt <= weanage)?ageInt:weanage;
+            this.weaned = (ageInt < weanage) ? 0 : weanage;
             this.SaleFlag = HerdChangeReason.None;
             this.Attributes = new IndividualAttributeList();
         }
@@ -685,6 +819,56 @@ namespace Models.CLEM.Resources
             else
                 return new RuminantFemale(parameters, age, weight);
         }
+
+        /// <summary>
+        /// Adds an attribute to an individual with ability to modify properties associated with the genotype
+        /// </summary>
+        /// <param name="attribute">base attribute from mother</param>
+        public void AddInheritedAttribute(KeyValuePair<string, IIndividualAttribute> attribute)
+        {
+            // get inherited value
+            IIndividualAttribute indAttribute = attribute.Value.GetInheritedAttribute() as IIndividualAttribute;
+
+            // is this a property attribute that may modify the individuals parameter set?
+            if(indAttribute?.SetAttributeSettings is SetAttributeWithProperty)
+            {
+                // has the value changed from that in the breed params provided to the individual?
+                if (indAttribute.StoredValue != (attribute.Value.SetAttributeSettings as SetAttributeWithProperty).RuminantPropertyInfo.GetValue(this))
+                {
+                    // is this still the shared breed params with the mother
+                    if(BreedParams != Mother.BreedParams)
+                    {
+                        // create deep copy of BreedParams
+
+
+                    }
+                    // update breedparams property to the new value
+                    (attribute.Value.SetAttributeSettings as SetAttributeWithProperty).RuminantPropertyInfo.SetValue(this, indAttribute.StoredValue);
+                }
+            }
+            Attributes.Add(attribute.Key, indAttribute);
+        }
+
+        /// <summary>
+        /// Adds an attribute to an individual with ability to modify properties associated with the genotype
+        /// </summary>
+        /// <param name="attribute">base attribute from mother</param>
+        public void AddNewAttribute(ISetAttribute attribute)
+        {
+            // get inherited value
+            IIndividualAttribute indAttribute = attribute.GetAttribute(true);
+
+            // if it requires a property modifier then create new modified breedparams
+
+            //if breedparams equals mother's create deep copy
+
+            // update breedparams
+
+            // save breed params to individual
+
+            Attributes.Add(attribute.AttributeName, indAttribute); //.Value.GetInheritedAttribute() as IIndividualAttribute);
+        }
+
     }
 
     /// <summary>

@@ -1,8 +1,6 @@
-﻿using APSIM.Shared.Documentation;
+﻿using System;
 using Models.Core;
 using Models.PMF.Phen;
-using System;
-using System.Collections.Generic;
 
 namespace Models.Functions.DemandFunctions
 {
@@ -13,7 +11,7 @@ namespace Models.Functions.DemandFunctions
         private int startStageIndex;
 
         private int endStageIndex;
-        
+
         /// <summary>The start stage name</summary>
         public string StartStageName = "";
 
@@ -52,21 +50,10 @@ namespace Models.Functions.DemandFunctions
         /// <value>The value.</value>
         public double Value(int arrayIndex = -1)
         {
-                if (Phenology.Between(startStageIndex, endStageIndex))
+            if (Phenology.Between(startStageIndex, endStageIndex))
                 return PotentialGrowthIncrement.Value(arrayIndex) * OrganNumber.Value(arrayIndex) * ThermalTime.Value(arrayIndex);
             else
                 return 0;
-        }
-
-        /// <summary>Document the model.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // Write description of this class from summary and remarks XML documentation.
-            foreach (var tag in GetModelDescription())
-                yield return tag;
-
-            foreach (var tag in DocumentChildren<IModel>())
-                yield return tag;
         }
 
         /// <summary>Called when [simulation commencing].</summary>

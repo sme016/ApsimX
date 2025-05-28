@@ -1,15 +1,11 @@
-﻿using APSIM.Shared.Documentation;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using APSIM.Shared.Graphing;
 using APSIM.Shared.Utilities;
 using Models.Core;
 using Models.Core.Run;
-using Models.Factorial;
 using Newtonsoft.Json;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Models
 {
@@ -116,6 +112,7 @@ namespace Models
         /// </summary>
         public override void OnCreated()
         {
+            base.OnCreated();
             if (this.FindChild<Manager>() == null)
             {
                 Manager script = new Manager();
@@ -133,15 +130,6 @@ namespace Models
         public void Run()
         {
             Cache.Clear();
-        }
-
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // tbi
-            yield break;
         }
 
         /// <summary>

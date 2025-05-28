@@ -1,25 +1,27 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Interfaces;
+using Models.Soils;
+using Models.Utilities;
+using Newtonsoft.Json;
+
 namespace Models.WaterModel
 {
-    using APSIM.Shared.Utilities;
-    using Interfaces;
-    using Models.Core;
-    using Models.Soils.Nutrients;
-    using Soils;
-    using System;
-    using System.Collections.Generic;
-    using System.Globalization;
-    using System.Linq;
-    using Newtonsoft.Json;
 
     /// <summary>
-    /// The SoilWater module is a cascading water balance model that owes much to its precursors in 
-    /// CERES (Jones and Kiniry, 1986) and PERFECT(Littleboy et al, 1992). 
-    /// The algorithms for redistribution of water throughout the soil profile have been inherited from 
+    /// The SoilWater module is a cascading water balance model that owes much to its precursors in
+    /// CERES (Jones and Kiniry, 1986) and PERFECT(Littleboy et al, 1992).
+    /// The algorithms for redistribution of water throughout the soil profile have been inherited from
     /// the CERES family of models.
     ///
-    /// The water characteristics of the soil are specified in terms of the lower limit (ll15), 
-    /// drained upper limit(dul) and saturated(sat) volumetric water contents. Water movement is 
-    /// described using separate algorithms for saturated or unsaturated flow. It is notable that 
+    /// The water characteristics of the soil are specified in terms of the lower limit (ll15),
+    /// drained upper limit(dul) and saturated(sat) volumetric water contents. Water movement is
+    /// described using separate algorithms for saturated or unsaturated flow. It is notable that
     /// redistribution of solutes, such as nitrate- and urea-N, is carried out in this module.
     ///
     /// Modifications adopted from PERFECT include:
@@ -27,35 +29,38 @@ namespace Models.WaterModel
     /// * small rainfall events are lost as first stage evaporation rather than by the slower process of second stage evaporation, and
     /// * specification of the second stage evaporation coefficient(cona) as an input parameter, providing more flexibility for describing differences in long term soil drying due to soil texture and environmental effects.
     ///
-    /// The module is interfaced with SurfaceOrganicMatter and crop modules so that simulation of the soil water balance 
+    /// The module is interfaced with SurfaceOrganicMatter and crop modules so that simulation of the soil water balance
     /// responds to change in the status of surface residues and crop cover(via tillage, decomposition and crop growth).
     ///
     /// Enhancements beyond CERES and PERFECT include:
     /// * the specification of swcon for each layer, being the proportion of soil water above dul that drains in one day
     /// * isolation from the code of the coefficients determining diffusivity as a function of soil water
     ///   (used in calculating unsaturated flow).Choice of diffusivity coefficients more appropriate for soil type have been found to improve model performance.
-    /// * unsaturated flow is permitted to move water between adjacent soil layers until some nominated gradient in 
+    /// * unsaturated flow is permitted to move water between adjacent soil layers until some nominated gradient in
     ///   soil water content is achieved, thereby accounting for the effect of gravity on the fully drained soil water profile.
     ///
-    /// SoilWater is called by APSIM on a daily basis, and typical of such models, the various processes are calculated consecutively. 
+    /// SoilWater is called by APSIM on a daily basis, and typical of such models, the various processes are calculated consecutively.
     /// This contrasts with models such as SWIM that solve simultaneously a set of differential equations that describe the flow processes.
     /// </summary>
     [ValidParent(ParentType = typeof(Soil))]
-    [ViewName("UserInterface.Views.ProfileView")]
+    [ViewName("ApsimNG.Resources.Glade.ProfileView.glade")]
     [PresenterName("UserInterface.Presenters.ProfilePresenter")]
     [Serializable]
-    public class WaterBalance : ModelCollectionFromResource, ISoilWater
+    public class WaterBalance : Model, ISoilWater
     {
+        private Physical physical;
+        private HyProps hyprops = new HyProps();
+
         /// <summary>Link to the soil properties.</summary>
         [Link]
         private Soil soil = null;
-        
+
         /// <summary>Access the soil physical properties.</summary>
-        [Link] 
+        [Link]
         private IPhysical soilPhysical = null;
 
         [Link]
-        Sample initial = null;
+        Water water = null;
 
         [Link]
         private ISummary summary = null;
@@ -84,17 +89,8 @@ namespace Models.WaterModel
         [Link(Type = LinkType.Child, ByName = true)]
         private WaterTableModel waterTableModel = null;
 
-        [Link(ByName = true)]
-        ISolute no3 = null;
-
-        [Link(ByName = true)]
-        ISolute nh4 = null;
-
-        [Link(ByName = true)]
-        ISolute urea = null;
-
-        [Link(ByName = true, IsOptional = true)]
-        ISolute cl = null;
+        /// <summary>Solute models.</summary>
+        private List<Solute> solutes = new();
 
         /// <summary>Irrigation information.</summary>
         [NonSerialized]
@@ -193,10 +189,19 @@ namespace Models.WaterModel
         [Description("Catchment area for lateral flow calculations")]
         public double CatchmentArea { get; set; } = 10;
 
-        /// <summary>Depth strings. Wrapper around Thickness.</summary>
-        [JsonIgnore]
-        [Description("Depth")]
+        /// <summary>
+        /// Gets the matric Potential at DUL (cm)
+        /// </summary>
+        [Description("Matric Potential at DUL (cm)")]
         [Units("cm")]
+        [Bounds(Lower = -1e3, Upper = 0.0)]
+        public double PSIDul { get; set; } = -100.0;
+
+        /// <summary>Depth strings. Wrapper around Thickness.</summary>
+        [Display]
+        [Units("mm")]
+        [Summary]
+        [JsonIgnore]
         public string[] Depth
         {
             get
@@ -210,20 +215,21 @@ namespace Models.WaterModel
         }
 
         /// <summary>Soil layer thickness for each layer (mm).</summary>
-        [Units("mm")]
-        [Description("Soil layer thickness for each layer")]
         public double[] Thickness { get; set; }
 
         /// <summary>Amount of water in the soil (mm).</summary>
         [JsonIgnore]
-        public double[] Water 
-        { 
-            get { return waterMM; } 
-            set 
-            { 
-                waterMM = value; 
-                waterVolumetric = MathUtilities.Divide(value, soilPhysical.Thickness); 
-            } 
+        public double[] Water
+        {
+            get { return waterMM; }
+            set
+            {
+                waterMM = value;
+                if (value == null)
+                    waterVolumetric = null;
+                else
+                    waterVolumetric = MathUtilities.Divide(value, soilPhysical.Thickness);
+            }
         }
 
         /// <summary>Amount of water in the soil (mm/mm).</summary>
@@ -238,17 +244,47 @@ namespace Models.WaterModel
             }
         }
 
+        /// <summary>Water potential of layer</summary>
+        [Units("cm")]
+        public double[] PSI
+        {
+            get
+            {
+                double[] psi = new double[soilPhysical.Thickness.Length];
+                for (int i = 0; i < soilPhysical.Thickness.Length; i++)
+                {
+                    psi[i] = hyprops.Suction(i, SW[i], psi, PSIDul, soilPhysical.LL15, soilPhysical.DUL, soilPhysical.SAT);
+                    if (soilPhysical.KS != null)
+                        K[i] = hyprops.SimpleK(i, psi[i], soilPhysical.SAT, soilPhysical.KS);
+                }
+                return psi;
+            }
+        }
+
+        /// <summary>Hydraulic Conductivity of layer</summary>
+        [Units("cm/h")]
+        public double[] K { get; private set; }
+
+        ///<summary>Pore Interaction Index for shape of the K(theta) curve for soil hydraulic conductivity</summary>
+        [JsonIgnore]
+        [Units("-")]
+        public double[] PoreInteractionIndex
+        {
+            get
+            {
+                return hyprops.PoreInteractionIndex;
+            }
+            set
+            {
+                hyprops.PoreInteractionIndex = value;
+                if (physical.KS != null)
+                    hyprops.SetupKCurve(physical.Thickness.Length, physical.LL15, physical.DUL, physical.SAT, physical.KS, 0.1, PSIDul);
+            }
+        }
+
         /// <summary>Runon (mm).</summary>
         [JsonIgnore]
         public double Runon { get; set; }
-
-        /// <summary>The efficiency (0-1) that solutes move down with water.</summary>
-        [JsonIgnore]
-        public double[] SoluteFluxEfficiency { get; set; }
-
-        /// <summary>The efficiency (0-1) that solutes move up with water.</summary>
-        [JsonIgnore]
-        public double[] SoluteFlowEfficiency { get; set; }
 
         /// <summary> This is set by Microclimate and is rainfall less that intercepted by the canopy and residue components </summary>
         [JsonIgnore]
@@ -275,6 +311,10 @@ namespace Models.WaterModel
         /// <summary>Drainage (mm).</summary>
         [JsonIgnore]
         public double Drainage { get { if (Flux == null) return 0; else return Flux[Flux.Length - 1]; } }
+
+        /// <summary>Subsurface drain (mm)</summary>
+        [JsonIgnore]
+        public double SubsurfaceDrain => 0;
 
         /// <summary>Evaporation (mm).</summary>
         [JsonIgnore]
@@ -343,10 +383,11 @@ namespace Models.WaterModel
         /// At thicknesses specified in "SoilWater" node of GUI.
         /// Use Soil.SWCON for SWCON in standard thickness
         /// </remarks>
+        [Display(Format = "N3")]
+        [Summary]
         [Bounds(Lower = 0.0, Upper = 1.0)]
         [Units("/d")]
         [Caption("SWCON")]
-        [Description("Fractional amount of water above DUL that can drain under gravity per day (SWCON)")]
         public double[] SWCON { get; set; }
 
         /// <summary>Lateral saturated hydraulic conductivity (KLAT).</summary>
@@ -355,15 +396,16 @@ namespace Models.WaterModel
         /// At thicknesses specified in "SoilWater" node of GUI.
         /// Use Soil.KLAT for KLAT in standard thickness
         /// </remarks>
+        [Display(Format = "N3")]
+        [Summary]
         [Bounds(Lower = 0, Upper = 1.0e3F)]
         [Units("mm/d")]
         [Caption("Klat")]
-        [Description("Lateral saturated hydraulic conductivity (KLAT)")]
         public double[] KLAT { get; set; }
 
         /// <summary>Amount of N leaching as NO3-N from the deepest soil layer (kg /ha)</summary>
         [JsonIgnore]
-        public double LeachNO3 { get { if (FlowNO3 == null) return 0; else return FlowNO3.Last(); } }
+        public double LeachNO3 => GetLeach("NO3");
 
         /// <summary>Amount of N leaching as NH4-N from the deepest soil layer (kg /ha)</summary>
         [JsonIgnore]
@@ -371,19 +413,11 @@ namespace Models.WaterModel
 
         /// <summary>Amount of N leaching as urea-N  from the deepest soil layer (kg /ha)</summary>
         [JsonIgnore]
-        public double LeachUrea { get { if (FlowUrea == null) return 0; else return FlowUrea.Last(); } }
+        public double LeachUrea => GetLeach("Urea");
 
-        /// <summary>Amount of N leaching as NO3 from each soil layer (kg /ha)</summary>
+        /// <summary>Amount of Cl leaching from the deepest soil layer (kg /ha)</summary>
         [JsonIgnore]
-        public double[] FlowNO3 { get; private set; }
-
-        /// <summary>Amount of N leaching as NH4 from each soil layer (kg /ha)</summary>
-        [JsonIgnore]
-        public double[] FlowNH4 { get; private set; }
-
-        /// <summary>Amount of N leaching as urea from each soil layer (kg /ha)</summary>
-        [JsonIgnore]
-        public double[] FlowUrea { get; private set; }
+        public double LeachCl => GetLeach("Cl");
 
         /// <summary> This is set by Microclimate and is rainfall less that intercepted by the canopy and residue components </summary>
         [JsonIgnore]
@@ -469,26 +503,29 @@ namespace Models.WaterModel
             {
                 if (irrigation.Amount > 0)
                 {
+                    if (irrigation.Time != "00:00" || irrigation.Duration < 1440)
+                        throw new Exception("Water balance unable to apply sub-daily irrigation applications.");
+
                     int irrigationLayer = SoilUtilities.LayerIndexOfDepth(soilPhysical.Thickness, Convert.ToInt32(irrigation.Depth, CultureInfo.InvariantCulture));
                     Water[irrigationLayer] += irrigation.Amount;
                     if (irrigationLayer == 0)
                         Infiltration += irrigation.Amount;
 
-                    if (no3 != null)
-                        no3.kgha[irrigationLayer] += irrigation.NO3;
+                    if (irrigation.NO3 > 0)
+                        GetSolute("NO3").kgha[irrigationLayer] += irrigation.NO3;
 
-                    if (nh4 != null)
-                        nh4.kgha[irrigationLayer] += irrigation.NH4;
+                    if (irrigation.NH4 > 0)
+                        GetSolute("NH4").kgha[irrigationLayer] += irrigation.NH4;
 
-                    if (cl != null)
-                        cl.kgha[irrigationLayer] += irrigation.CL;
+                    if (irrigation.CL > 0)
+                        GetSolute("CL").kgha[irrigationLayer] += irrigation.CL;
                 }
             }
 
             // Saturated flow.
             Flux = saturatedFlow.Values;
 
-            // Add backed up water to runoff. 
+            // Add backed up water to runoff.
             Water[0] = Water[0] - saturatedFlow.backedUpSurface;
 
             // Now reduce the infiltration amount by what backed up.
@@ -501,14 +538,14 @@ namespace Models.WaterModel
             //  pond = Math.Min(Runoff, max_pond);
             MoveDown(Water, Flux);
 
-            double[] no3Values = no3.kgha;
-            double[] ureaValues = urea.kgha;
-
-            // Calcualte solute movement down with water.
-            double[] no3Down = CalculateSoluteMovementDown(no3Values, Water, Flux, SoluteFluxEfficiency);
-            MoveDown(no3Values, no3Down);
-            double[] ureaDown = CalculateSoluteMovementDown(ureaValues, Water, Flux, SoluteFluxEfficiency);
-            MoveDown(ureaValues, ureaDown);
+            Dictionary<string, (double[] values, double[] down)> soluteDown = new();
+            foreach (var solute in solutes)
+            {
+                double[] values = solute.kgha;
+                var down = CalculateSoluteMovementDown(values, Water, Flux, solute.SoluteFluxEfficiency);
+                MoveDown(values, down);
+                soluteDown.Add(solute.Name, (values, down));
+            }
 
             // Calculate evaporation and remove from top layer.
             double es = evaporationModel.Calculate();
@@ -525,21 +562,41 @@ namespace Models.WaterModel
             waterTableModel.Calculate();
 
             // Calculate and apply net solute movement.
-            double[] no3Up = CalculateNetSoluteMovement(no3Values, Water, Flow, SoluteFlowEfficiency);
-            MoveUp(no3Values, no3Up);
-            double[] ureaUp = CalculateNetSoluteMovement(ureaValues, Water, Flow, SoluteFlowEfficiency);
-            MoveUp(ureaValues, ureaUp);
-
-            // Update flow output variables.
-            FlowNO3 = MathUtilities.Subtract(no3Down, no3Up);
-            FlowUrea = MathUtilities.Subtract(ureaDown, ureaUp);
-
-            // Set solute state variables.
-            no3.SetKgHa(SoluteSetterType.Soil, no3Values);
-            urea.SetKgHa(SoluteSetterType.Soil, ureaValues);
+            foreach (var solute in solutes)
+            {
+                var up = CalculateNetSoluteMovement(soluteDown[solute.Name].values, Water, Flow, solute.SoluteFlowEfficiency);
+                MoveUp(soluteDown[solute.Name].values, up);
+                solute.SetKgHa(SoluteSetterType.Soil, soluteDown[solute.Name].values); // not sure this is necessary as we change the array on the line above.
+                var down = soluteDown[solute.Name].down;
+                solute.Flow = MathUtilities.Subtract(down, up);
+            }
 
             // Now that we've finished moving water, calculate volumetric water
             waterVolumetric = MathUtilities.Divide(Water, soilPhysical.Thickness);
+
+            // Update the variable in the water model.
+            water.Volumetric = waterVolumetric;
+        }
+
+        /// <summary>
+        /// Get the solute object with the specified name.
+        /// </summary>
+        /// <param name="name">Name of solute</param>
+        /// <returns>Solute or throws if not found.</returns>
+        private ISolute GetSolute(string name)
+        {
+            var solute = solutes.FirstOrDefault(solute => solute.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase));
+            if (solute == null)
+                throw new Exception($"Cannot find solute with name {name}");
+            return solute;
+        }
+
+        private double GetLeach(string soluteName)
+        {
+            var solute = GetSolute(soluteName);
+            if (solute != null && solute.Flow != null)
+                return solute.Flow.Last();
+            return 0;
         }
 
         /// <summary>Move water down the profile</summary>
@@ -761,7 +818,7 @@ namespace Models.WaterModel
         }
 
         /// <summary>Sets the water table.</summary>
-        /// <param name="InitialDepth">The initial depth.</param> 
+        /// <param name="InitialDepth">The initial depth.</param>
         public void SetWaterTable(double InitialDepth)
         {
             WaterTable = InitialDepth;
@@ -777,10 +834,8 @@ namespace Models.WaterModel
         /// <summary>Initialise the model.</summary>
         private void Initialise()
         {
-            FlowNH4 = MathUtilities.CreateArrayOfValues(0.0, Thickness.Length);
-            SoluteFlowEfficiency = MathUtilities.CreateArrayOfValues(1.0, Thickness.Length);
-            SoluteFluxEfficiency = MathUtilities.CreateArrayOfValues(1.0, Thickness.Length);
-            Water = initial.SWmm;
+            solutes = FindAllSiblings<Solute>().ToList();
+            Water = water.InitialValuesMM;
             Runon = 0;
             Runoff = 0;
             PotentialInfiltration = 0;
@@ -788,6 +843,11 @@ namespace Models.WaterModel
             Flow = null;
             evaporationModel.Initialise();
             irrigations = new List<IrrigationApplicationType>();
+
+            int n = soilPhysical.Thickness.Length;
+            hyprops.ResizePropfileArrays(n);
+            hyprops.SetupThetaCurve(PSIDul, n - 1, soilPhysical.LL15, soilPhysical.DUL, soilPhysical.SAT);
+            K = new double[n];
         }
 
         ///<summary>Perform tillage</summary>
@@ -806,7 +866,7 @@ namespace Models.WaterModel
             runoffModel.TillageCnRed = reduction;
             runoffModel.CumWaterSinceTillage = 0.0;
 
-            var line = string.Format("Soil tilled. CN reduction = {0}. Cumulative rain = {1}", 
+            var line = string.Format("Soil tilled. CN reduction = {0}. Cumulative rain = {1}",
                                      reduction, Data.cn_rain);
             summary.WriteMessage(this, line, MessageType.Diagnostic);
         }
@@ -815,6 +875,13 @@ namespace Models.WaterModel
         public void Tillage(string tillageType)
         {
             throw new NotImplementedException();
+        }
+
+        /// <summary>Set the physical node.</summary>
+        /// <remarks>I'm not sure why this is necessary</remarks>
+        public void SetPhysical(Physical physical)
+        {
+            this.physical = physical;
         }
     }
 }

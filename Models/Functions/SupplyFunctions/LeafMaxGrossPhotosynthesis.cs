@@ -1,11 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
 using Models.Core;
-using APSIM.Shared.Utilities;
-using Models.Interfaces;
-using APSIM.Shared.Documentation;
 
 namespace Models.Functions.SupplyFunctions
 {
@@ -77,16 +71,16 @@ namespace Models.Functions.SupplyFunctions
 
                 CO2 = Math.Max(CO2, CO2Cmp);
                 CO2I = CO2R * CO2;
-  
+
                 //For C4 crop, AgPasture Proposed by Cullen et al. (2009) based on FACE experiments
-                CO2Func = CO2/ (CO2 + 150) * (CO2ref + 150)/CO2ref;
+                CO2Func = CO2 / (CO2 + 150) * (CO2ref + 150) / CO2ref;
 
             }
 
             else
                 throw new ApsimXException(this, "Need to be C3 or C4");
 
-        
+
             //------------------------------------------------------------------------
             //Temperature response and Efect of daytime temperature
 
@@ -97,17 +91,6 @@ namespace Models.Functions.SupplyFunctions
             PmaxGross = Math.Max((float)1.0, Pgmmax * (CO2Func * TempFunc * Fact));
 
             return PmaxGross;
-        }
-
-        /// <summary>Document the model.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // Write description of this class from summary and remarks XML documentation.
-            foreach (var tag in GetModelDescription())
-                yield return tag;
-
-            foreach (var tag in DocumentChildren<IModel>())
-                yield return tag;
         }
     }
 }

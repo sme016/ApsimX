@@ -1,10 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using Models.Functions;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace Models.Core.ApsimFile
@@ -24,7 +23,7 @@ namespace Models.Core.ApsimFile
         /// <param name="node">The node.</param>
         /// <remarks>
         /// This actually fetches the 'Apsim' name of the node.
-        /// e.g. For a Report called HarvestReport this will return 
+        /// e.g. For a Report called HarvestReport this will return
         /// HarvestReport.
         /// </remarks>
         public static string Name(JToken node)
@@ -104,7 +103,7 @@ namespace Models.Core.ApsimFile
             string lessAssembly = allBits[0];
             string[] pathBits = lessAssembly.Split('.');
             string nameSpace = "";
-            for (int i = 0; i < pathBits.Length-1; i++)
+            for (int i = 0; i < pathBits.Length - 1; i++)
             {
                 nameSpace += pathBits[i] + '.';
             }
@@ -161,10 +160,10 @@ namespace Models.Core.ApsimFile
         /// Returns the descendant of a given node of the specified type.
         /// </summary>
         /// <param name="node">The node.</param>
-        /// <param name="type">The type of model to search for.</param>
-        public static JObject DescendantOfType(JObject node, Type type)
+        /// <param name="typeName">The type name of model to search for (e.g. Physical).</param>
+        public static JObject DescendantOfType(JObject node, string typeName)
         {
-            return ChildrenRecursively(node).FirstOrDefault(child => Type(child) == type.Name);
+            return ChildrenRecursively(node).FirstOrDefault(child => Type(child) == typeName);
         }
 
         /// <summary>
@@ -360,6 +359,18 @@ namespace Models.Core.ApsimFile
         }
 
         /// <summary>
+        /// Replaces the type a child node if it exists.
+        /// </summary>
+        /// <param name="node">Parent node.</param>
+        /// <param name="currentType">Type of child model to replace, including full namespace</param>
+        /// <param name="newType">New type of child model, including full namespace</param>
+        public static void ReplaceChildModelType(JObject node, string currentType, string newType)
+        {
+            foreach (JObject child in ChildrenRecursively(node, currentType))
+                child["$type"] = child["$type"].ToString().Replace(currentType, newType);
+        }
+
+        /// <summary>
         /// Gets a list of property values.
         /// </summary>
         /// <param name="node">The model node to look under.</param>
@@ -406,7 +417,8 @@ namespace Models.Core.ApsimFile
         /// <param name="report">The report model.</param>
         /// <param name="searchPattern">The pattern to search for.</param>
         /// <param name="replacePattern">The string to replace.</param>
-        public static bool SearchReplaceReportVariableNames(JObject report, string searchPattern, string replacePattern)
+        /// <param name="caseSensitive">Perform a case-sensitive search?</param>
+        public static bool SearchReplaceReportVariableNames(JObject report, string searchPattern, string replacePattern, bool caseSensitive = true)
         {
             var variableNames = Values(report, "VariableNames");
 
@@ -423,6 +435,65 @@ namespace Models.Core.ApsimFile
                     SetValues(report, "VariableNames", variableNames);
             }
             return replacementMade;
+        }
+
+        /// <summary>
+        /// Perform a search and replace in graph variables.
+        /// </summary>
+        /// <param name="graph">The graph model.</param>
+        /// <param name="searchPattern">The pattern to search for.</param>
+        /// <param name="replacePattern">The string to replace.</param>
+        public static bool SearchReplaceGraphVariableNames(JObject graph, string searchPattern, string replacePattern)
+        {
+
+            bool replacementMade = false;
+
+            if (graph["XFieldName"] != null)
+            {
+                if (graph["XFieldName"].ToString().Contains(searchPattern))
+                {
+                    graph["XFieldName"] = graph["XFieldName"].ToString().Replace(searchPattern, replacePattern);
+                    replacementMade = true;
+                }
+            }
+            if (graph["X2FieldName"] != null)
+            {
+                if (graph["X2FieldName"].ToString().Contains(searchPattern))
+                {
+                    graph["X2FieldName"] = graph["X2FieldName"].ToString().Replace(searchPattern, replacePattern);
+                    replacementMade = true;
+                }
+            }
+            if (graph["YFieldName"] != null)
+            {
+                if (graph["YFieldName"].ToString().Contains(searchPattern))
+                {
+                    graph["YFieldName"] = graph["YFieldName"].ToString().Replace(searchPattern, replacePattern);
+                    replacementMade = true;
+                }
+            }
+            if (graph["Y2FieldName"] != null)
+            {
+                if (graph["Y2FieldName"].ToString().Contains(searchPattern))
+                {
+                    graph["y2FieldName"] = graph["Y2FieldName"].ToString().Replace(searchPattern, replacePattern);
+                    replacementMade = true;
+                }
+            }
+
+            return replacementMade;
+        }
+
+        /// <summary>
+        /// Add a constant function to the specified JSON model token.
+        /// </summary>
+        /// <param name="modelToken">The APSIM model token.</param>
+        /// <param name="name">The name of the constant function</param>
+        /// <param name="fixedValue">The fixed value of the constant function</param>
+        public static void AddConstantFunctionIfNotExists(JObject modelToken, string name, double fixedValue)
+        {
+            string stringValue = fixedValue.ToString(CultureInfo.InvariantCulture);
+            AddConstantFunctionIfNotExists(modelToken, name, stringValue);
         }
 
         /// <summary>
@@ -497,7 +568,7 @@ namespace Models.Core.ApsimFile
             JObject child = JObject.Parse(json);
             children.Add(child);
         }
-        
+
         /// <summary>
         /// Adds a model of a given type as a child of node.
         /// </summary>
@@ -642,6 +713,24 @@ namespace Models.Core.ApsimFile
                     simpleGrazing["FlexibleExpressionForTimingOfGrazing"] = expression;
                 }
             }
+            foreach (var factor in JsonUtilities.ChildrenOfType(node, "Factor"))
+            {
+                var specification = factor["Specification"]?.ToString();
+                if (specification != null)
+                {
+                    bool replacementFound = false;
+                    foreach (var replacement in changes)
+                    {
+                        replacementFound = specification.ToString().Contains(replacement.Item1) || replacementFound;
+                        specification = specification.ToString().Replace(replacement.Item1, replacement.Item2);
+                    }
+                    if (replacementFound)
+                    {
+                        replacementMade = true;
+                        factor["Specification"] = specification;
+                    }
+                }
+            }
 
             foreach (var compositeFactor in JsonUtilities.ChildrenOfType(node, "CompositeFactor"))
             {
@@ -714,6 +803,23 @@ namespace Models.Core.ApsimFile
                 }
             }
 
+            foreach (var croptimizr in JsonUtilities.ChildrenOfType(node, "CroptimizR"))
+            {
+                foreach (var replacement in changes)
+                {
+                    foreach (var parameter in croptimizr["Parameters"] as JArray)
+                    {
+                        var path = parameter["Path"].ToString();
+                        if (path.Contains(replacement.Item1))
+                        {
+                            parameter["Path"] = path.Replace(replacement.Item1, replacement.Item2);
+                            replacementMade = true;
+                        }
+                    }
+                }
+            }
+
+
             return replacementMade;
         }
 
@@ -736,5 +842,48 @@ namespace Models.Core.ApsimFile
 
             return null;
         }
+
+        /// <summary>
+        /// Find an ancestor model of the given type.
+        /// </summary>
+        /// <param name="token">Model whose ancestor we want to find.</param>
+        /// <param name="typeName">Type name of ancestor to search for.</param>
+        public static JObject Ancestor(JObject token, string typeName)
+        {
+            JToken parent = Parent(token);
+            while (parent != null)
+            {
+                var typeTokens = Type(parent, true).Split(".");
+                if (typeTokens != null && typeTokens.Last() == typeName)
+                    return parent as JObject;
+
+                parent = Parent(parent);
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Adds a JObject child to another JObject.
+        /// </summary>
+        /// <param name="node"></param>
+        /// <param name="child"></param>
+        public static void AddChild(JObject node, JObject child)
+        {
+            var children = node["Children"] as JArray;
+            children.Add(child);
+        }
+
+        /// <summary>
+        /// Gets the apsimx file version number from the first file in the array.
+        /// </summary>
+        /// <param name="simsJObject">The top level JObject from an apsimx file</param>
+        /// <returns></returns>
+        public static string GetApsimFileVersion(JObject simsJObject)
+        {
+            string fileVersionNumber = simsJObject["Version"].ToString();
+            return fileVersionNumber;
+        }
+
     }
 }

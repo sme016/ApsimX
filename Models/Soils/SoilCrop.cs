@@ -1,34 +1,59 @@
-﻿namespace Models.Soils
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Interfaces;
+using Models.Utilities;
+using Newtonsoft.Json;
+
+namespace Models.Soils
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using System;
 
     /// <summary>A soil crop parameterization class.</summary>
     [Serializable]
-    [ViewName("UserInterface.Views.ProfileView")]
+    [ViewName("ApsimNG.Resources.Glade.ProfileView.glade")]
     [PresenterName("UserInterface.Presenters.ProfilePresenter")]
     [ValidParent(ParentType = typeof(Physical))]
     public class SoilCrop : Model
     {
-        /// <summary>Crop lower limit</summary>
+        /// <summary>Depth strings (mm/mm)</summary>
+        [Display]
         [Summary]
-        [Description("LL")]
+        [Units("mm")]
+        public string[] Depth => (Parent as Physical).Depth;
+
+        /// <summary>Crop lower limit (mm/mm)</summary>
+        [Summary]
+        [Display(Format = "N3")]
         [Units("mm/mm")]
         public double[] LL { get; set; }
-        
+
+        /// <summary>Crop lower limit (mm)</summary>
+        [Units("mm")]
+        public double[] LLmm
+        {
+            get
+            {
+                var soilPhysical = FindAncestor<IPhysical>();
+                if (soilPhysical == null)
+                    return null;
+                return MathUtilities.Multiply(LL, soilPhysical.Thickness);
+            }
+        }
+
         /// <summary>The KL value.</summary>
         [Summary]
-        [Description("KL")]
-        [Display(Format = "N2")]
         [Units("/day")]
+        [Display(Format = "N3")]
         public double[] KL { get; set; }
 
         /// <summary>The exploration factor</summary>
         [Summary]
-        [Description("XF")]
-        [Display(Format = "N1")]
         [Units("0-1")]
+        [Display(Format = "N3")]
         public double[] XF { get; set; }
 
         /// <summary>The metadata for crop lower limit</summary>
@@ -41,8 +66,6 @@
         public string[] XFMetadata { get; set; }
 
         /// <summary>Return the plant available water CAPACITY at standard thickness.</summary>
-        [Description("PAWC")]
-        [Display(Format = "N2", ShowTotal = true)]
         [Units("mm/mm")]
         public double[] PAWC
         {
@@ -52,6 +75,50 @@
                 if (soilPhysical == null)
                     return null;
                 return SoilUtilities.CalcPAWC(soilPhysical.Thickness, LL, soilPhysical.DUL, XF);
+            }
+        }
+
+        /// <summary>Return the plant available water CAPACITY at standard thickness.</summary>
+        [Display(DisplayName = "PAWC", Format = "N1")]
+        [Units("mm")]
+        public double[] PAWCmm
+        {
+            get
+            {
+                var soilPhysical = FindAncestor<IPhysical>();
+                if (soilPhysical == null)
+                    return null;
+                return MathUtilities.Multiply(PAWC, soilPhysical.Thickness);
+            }
+        }
+
+        /// <summary>Return the plant available water (SW-CLL).</summary>
+        [Units("mm/mm")]
+        public double[] PAW
+        {
+            get
+            {
+                var soilPhysical = FindAncestor<IPhysical>();
+                if (soilPhysical == null)
+                    return null;
+                var water = FindInScope<Water>();
+                if (water == null)
+                    return null;
+                return SoilUtilities.CalcPAWC(soilPhysical.Thickness, LL, water.Volumetric, XF);
+            }
+        }
+
+        /// <summary>Return the plant available water (SW-CLL) (mm).</summary>
+        [Units("mm")]
+        public double[] PAWmm
+        {
+            get
+            {
+                var soilPhysical = FindAncestor<IPhysical>();
+                if (soilPhysical == null)
+                    return null;
+
+                return MathUtilities.Multiply(PAW, soilPhysical.Thickness);
             }
         }
     }

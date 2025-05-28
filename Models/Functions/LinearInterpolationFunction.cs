@@ -1,14 +1,11 @@
-﻿using APSIM.Shared.Documentation;
-using Models.Core;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using APSIM.Shared.Utilities;
-using System.Data;
+using Models.Core;
 
 namespace Models.Functions
 {
     /// <summary>
-    /// A linear interpolation model.
+    /// A linear interpolation model, where an 
     /// </summary>
     [Serializable]
     [ViewName("UserInterface.Views.PropertyView")]
@@ -33,7 +30,7 @@ namespace Models.Functions
         public LinearInterpolationFunction() { }
 
         /// <summary>Constructor</summary>
-        public LinearInterpolationFunction(double[] x, double[] y) 
+        public LinearInterpolationFunction(double[] x, double[] y)
         {
             XYPairs = new XYPairs() { X = x, Y = y };
         }
@@ -68,6 +65,7 @@ namespace Models.Functions
         /// <summary>Called when model has been created.</summary>
         public override void OnCreated()
         {
+            base.OnCreated();
             if (XYPairs != null)
             {
                 for (int i = 1; i < XYPairs.Y.Length; i++)
@@ -107,17 +105,6 @@ namespace Models.Functions
         public double ValueForX(double XValue)
         {
             return XYPairs.ValueIndexed(XValue);
-        }
-
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // fixme - the graph and table should be next to each other.
-            yield return new Paragraph($"*{Name}* is calculated using linear interpolation");
-            foreach (var tag in XYPairs.Document())
-                yield return tag;
         }
     }
 }

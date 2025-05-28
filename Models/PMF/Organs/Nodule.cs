@@ -1,25 +1,25 @@
-﻿
+﻿using System;
+using System.Collections.Generic;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Functions;
+using Models.Interfaces;
+using Models.PMF.Interfaces;
+using Models.PMF.Library;
+using Newtonsoft.Json;
+
 namespace Models.PMF.Organs
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Interfaces;
-    using Models.Functions;
-    using Models.PMF.Interfaces;
-    using Models.PMF.Library;
-    using System;
-    using APSIM.Shared.Documentation;
-    using System.Collections.Generic;
-    using Newtonsoft.Json;
 
     /// <summary>
-    /// This organ simulates the root structure associate with symbiotic N-fixing bacteria.  It provides the core functions of determining 
+    /// This organ simulates the root structure associate with symbiotic N-fixing bacteria.  It provides the core functions of determining
     ///  N fixation supply and related costs.  It also calculates the growth, senescence and detachment of nodules.
     /// </summary>
     [Serializable]
     [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
-    public class Nodule : Model, IOrgan, IArbitration, IOrganDamage
+    public class Nodule : Model, IOrgan, IArbitration, IOrganDamage, IHasDamageableBiomass
     {
         /// <summary>The fixation metabolic cost</summary>
         [Link(Type = LinkType.Child, ByName = true)]
@@ -57,7 +57,7 @@ namespace Models.PMF.Organs
             Allocated.MetabolicN += nitrogen.Metabolic;
 
             // Retranslocation
-            if (MathUtilities.IsGreaterThan(nitrogen.Retranslocation, startLive.StorageN + startLive.MetabolicN - NSupply.Retranslocation))
+            if (MathUtilities.IsGreaterThan(nitrogen.Retranslocation, startLive.StorageN + startLive.MetabolicN - NSupply.ReTranslocation))
                 throw new Exception("N retranslocation exceeds storage + metabolic nitrogen in organ: " + Name);
             double StorageNRetranslocation = Math.Min(nitrogen.Retranslocation, startLive.StorageN * (1 - senescenceRate.Value()) * nRetranslocationFactor.Value());
             Live.StorageN -= StorageNRetranslocation;
@@ -82,12 +82,12 @@ namespace Models.PMF.Organs
         [EventSubscribe("SetNSupply")]
         private void SetNSupply(object sender, EventArgs e)
         {
-            NSupply.Reallocation = Math.Max(0, (startLive.StorageN + startLive.MetabolicN) * senescenceRate.Value() * nReallocationFactor.Value());
-            if (NSupply.Reallocation < -BiomassToleranceValue)
+            NSupply.ReAllocation = Math.Max(0, (startLive.StorageN + startLive.MetabolicN) * senescenceRate.Value() * nReallocationFactor.Value());
+            if (NSupply.ReAllocation < -BiomassToleranceValue)
                 throw new Exception("Negative N reallocation value computed for " + Name);
 
-            NSupply.Retranslocation = Math.Max(0, (startLive.StorageN + startLive.MetabolicN) * (1 - senescenceRate.Value()) * nRetranslocationFactor.Value());
-            if (NSupply.Retranslocation < -BiomassToleranceValue)
+            NSupply.ReTranslocation = Math.Max(0, (startLive.StorageN + startLive.MetabolicN) * (1 - senescenceRate.Value()) * nRetranslocationFactor.Value());
+            if (NSupply.ReTranslocation < -BiomassToleranceValue)
                 throw new Exception("Negative N retranslocation value computed for " + Name);
 
             NSupply.Uptake = 0;
@@ -102,10 +102,10 @@ namespace Models.PMF.Organs
                 throw new Exception("Retranslocation exceeds non structural biomass in organ: " + Name);
 
             // get DM lost by respiration (growth respiration)
-            // GrowthRespiration with unit CO2 
-            // GrowthRespiration is calculated as 
-            // Allocated CH2O from photosynthesis "1 / DMConversionEfficiency.Value()", converted 
-            // into carbon through (12 / 30), then minus the carbon in the biomass, finally converted into 
+            // GrowthRespiration with unit CO2
+            // GrowthRespiration is calculated as
+            // Allocated CH2O from photosynthesis "1 / DMConversionEfficiency.Value()", converted
+            // into carbon through (12 / 30), then minus the carbon in the biomass, finally converted into
             // CO2 (44/12).
             double growthRespFactor = ((1.0 / dmConversionEfficiency.Value()) * (12.0 / 30.0) - 1.0 * CarbonConcentration.Value()) * 44.0 / 12.0;
 
@@ -195,12 +195,12 @@ namespace Models.PMF.Organs
         /// <summary>The DM demand function</summary>
         [Link(Type = LinkType.Child, ByName = true)]
         [Units("g/m2/d")]
-        private BiomassDemand dmDemands = null;
+        private NutrientPoolFunctions dmDemands = null;
 
         /// <summary>The N demand function</summary>
         [Link(Type = LinkType.Child, ByName = true)]
         [Units("g/m2/d")]
-        private BiomassDemand nDemands = null;
+        private NutrientPoolFunctions nDemands = null;
 
         /// <summary>The initial biomass dry matter weight</summary>
         [Link(Type = LinkType.Child, ByName = true)]
@@ -316,17 +316,17 @@ namespace Models.PMF.Organs
         /// <summary>Gets the maximum N concentration.</summary>
         [JsonIgnore]
         [Units("g/g")]
-        public double MaxNconc { get { return maximumNConc.Value(); } }
+        public double MaxNConc { get { return maximumNConc.Value(); } }
 
         /// <summary>Gets the minimum N concentration.</summary>
         [JsonIgnore]
         [Units("g/g")]
-        public double MinNconc { get { return minimumNConc.Value(); } }
+        public double MinNConc { get { return minimumNConc.Value(); } }
 
         /// <summary>Gets the minimum N concentration.</summary>
         [JsonIgnore]
         [Units("g/g")]
-        public double CritNconc { get { return criticalNConc.Value(); } }
+        public double CritNConc { get { return criticalNConc.Value(); } }
 
         /// <summary>Gets the total (live + dead) dry matter weight (g/m2)</summary>
         [JsonIgnore]
@@ -341,7 +341,7 @@ namespace Models.PMF.Organs
         /// <summary>Gets the total (live + dead) N concentration (g/g)</summary>
         [JsonIgnore]
         [Units("g/g")]
-        public double Nconc
+        public double NConc
         {
             get
             {
@@ -352,18 +352,39 @@ namespace Models.PMF.Organs
             }
         }
 
-        /// <summary>Removes biomass from organs when harvest, graze or cut events are called.</summary>
-        /// <param name="biomassRemoveType">Name of event that triggered this biomass remove call.</param>
-        /// <param name="amountToRemove">The fractions of biomass to remove</param>
-        public virtual void RemoveBiomass(string biomassRemoveType, OrganBiomassRemovalType amountToRemove)
+        /// <summary>A list of material (biomass) that can be damaged.</summary>
+        public IEnumerable<DamageableBiomass> Material
         {
-            biomassRemovalModel.RemoveBiomass(biomassRemoveType, amountToRemove, Live, Dead, Removed, Detached);
+            get
+            {
+                yield return new DamageableBiomass($"{Parent.Name}.{Name}", Live, true);
+                yield return new DamageableBiomass($"{Parent.Name}.{Name}", Dead, false);
+            }
+        }
+
+        /// <summary>Remove biomass from organ.</summary>
+        /// <param name="liveToRemove">Fraction of live biomass to remove from simulation (0-1).</param>
+        /// <param name="deadToRemove">Fraction of dead biomass to remove from simulation (0-1).</param>
+        /// <param name="liveToResidue">Fraction of live biomass to remove and send to residue pool(0-1).</param>
+        /// <param name="deadToResidue">Fraction of dead biomass to remove and send to residue pool(0-1).</param>
+        /// <returns>The amount of biomass (live+dead) removed from the plant (g/m2).</returns>
+        public double RemoveBiomass(double liveToRemove, double deadToRemove, double liveToResidue, double deadToResidue)
+        {
+            return biomassRemovalModel.RemoveBiomass(liveToRemove, deadToRemove, liveToResidue, deadToResidue, Live, Dead, Removed, Detached);
+        }
+
+        /// <summary>Harvest the organ.</summary>
+        /// <returns>The amount of biomass (live+dead) removed from the plant (g/m2).</returns>
+        public double Harvest()
+        {
+            return RemoveBiomass(biomassRemovalModel.HarvestFractionLiveToRemove, biomassRemovalModel.HarvestFractionDeadToRemove,
+                                 biomassRemovalModel.HarvestFractionLiveToResidue, biomassRemovalModel.HarvestFractionDeadToResidue);
         }
 
         /// <summary>Computes the amount of DM available for retranslocation.</summary>
         public double AvailableDMRetranslocation()
         {
-            double availableDM = Math.Max(0.0, startLive.StorageWt - DMSupply.Reallocation) * dmRetranslocationFactor.Value();
+            double availableDM = Math.Max(0.0, startLive.StorageWt - DMSupply.ReAllocation) * dmRetranslocationFactor.Value();
             if (availableDM < -BiomassToleranceValue)
                 throw new Exception("Negative DM retranslocation value computed for " + Name);
 
@@ -384,8 +405,8 @@ namespace Models.PMF.Organs
         [EventSubscribe("SetDMSupply")]
         protected virtual void SetDMSupply(object sender, EventArgs e)
         {
-            DMSupply.Reallocation = AvailableDMReallocation();
-            DMSupply.Retranslocation = AvailableDMRetranslocation();
+            DMSupply.ReAllocation = AvailableDMReallocation();
+            DMSupply.ReTranslocation = AvailableDMRetranslocation();
             DMSupply.Fixation = 0;
             DMSupply.Uptake = 0;
         }
@@ -396,7 +417,7 @@ namespace Models.PMF.Organs
         {
             if (dmConversionEfficiency.Value() > 0.0)
             {
-                DMDemand.Structural = (dmDemands.Structural.Value() / dmConversionEfficiency.Value() + remobilisationCost.Value()) ;
+                DMDemand.Structural = (dmDemands.Structural.Value() / dmConversionEfficiency.Value() + remobilisationCost.Value());
                 DMDemand.Storage = Math.Max(0, dmDemands.Storage.Value() / dmConversionEfficiency.Value());
                 DMDemand.Metabolic = 0;
             }
@@ -473,8 +494,7 @@ namespace Models.PMF.Organs
         [EventSubscribe("DoDailyInitialisation")]
         protected void OnDoDailyInitialisation(object sender, EventArgs e)
         {
-            if (parentPlant.IsAlive || parentPlant.IsEnding)
-                ClearBiomassFlows();
+            ClearBiomassFlows();
         }
 
         /// <summary>Called when crop is ending</summary>
@@ -561,184 +581,15 @@ namespace Models.PMF.Organs
             Clear();
         }
 
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
+        /// <summary>Called when crop is harvested</summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+        [EventSubscribe("PostHarvesting")]
+        protected void OnPostHarvesting(object sender, HarvestingParameters e)
         {
-            foreach (ITag tag in GetModelDescription())
-                yield return tag;
-
-            // Document DM demands.
-            yield return new Section("Dry Matter Demand", DocumentDMDemands());
-
-            // Document N demands.
-            yield return new Section("Nitrogen Demand", DocumentNDemand());
-
-            // Document N concentration thresholds.
-            // todo: Should these be in their own section?
-            foreach (ITag tag in minimumNConc.Document())
-                yield return tag;
-
-            foreach (ITag tag in criticalNConc.Document())
-                yield return tag;
-
-            foreach (ITag tag in maximumNConc.Document())
-                yield return tag;
-
-            IModel nDemandSwitch = FindChild("NitrogenDemandSwitch");
-            if (nDemandSwitch != null)
-            {
-                if (nDemandSwitch is Constant nDemandConst)
-                {
-                    if (nDemandConst.Value() == 1)
-                    {
-                        //Don't bother documenting as is does nothing
-                    }
-                    else
-                    {
-                        yield return new Paragraph($"The demand for N is reduced by a factor of {nDemandConst.Value()} as specified by the NitrogenDemandSwitch");
-                    }
-                }
-                else
-                {
-                    yield return new Paragraph("The demand for N is reduced by a factor specified by the NitrogenDemandSwitch.");
-                    foreach (ITag tag in nDemandSwitch.Document())
-                        yield return tag;
-                }
-            }
-
-            // document DM supplies
-            yield return new Section("Dry Matter Supply", DocumentDMSupply());
-            
-
-            // Document N supplies.
-            yield return new Section("Nitrogen Supply", DocumentNSupply());
-            
-
-            // Document N fixation.
-            IModel fixationRate = FindChild("FixationRate");
-            if (fixationRate != null)
-                foreach (ITag tag in fixationRate.Document())
-                    yield return tag;
-
-            // Document senescence and detachment.
-            yield return new Section("Senescence and Detachment", DocumentSenescenceRate());
-
-            if (biomassRemovalModel != null)
-                foreach (ITag tag in biomassRemovalModel.Document())
-                    yield return tag;
+            if (e.RemoveBiomass)
+                Harvest();
         }
 
-        private IEnumerable<ITag> DocumentSenescenceRate()
-        {
-            if (senescenceRate is Constant senescenceConst)
-            {
-                if (senescenceConst.Value() == 0)
-                    yield return new Paragraph($"{Name} has senescence parameterised to zero so all biomass in this organ will remain alive.");
-                else
-                    yield return new Paragraph($"{Name} senesces {senescenceConst.Value() * 100}% of its live biomass each day, moving the corresponding amount of biomass from the live to the dead biomass pool.");
-            }
-            else
-            {
-                yield return new Paragraph("The proportion of live biomass that senesces and moves into the dead pool each day is quantified by the SenescenceRate.");
-                foreach (ITag tag in senescenceRate.Document())
-                    yield return tag;
-            }
-
-            if (detachmentRateFunction is Constant detachmentConst)
-            {
-                if (detachmentConst.Value() == 0)
-                    yield return new Paragraph($"{Name} has detachment parameterised to zero so all biomass in this organ will remain with the plant until a defoliation or harvest event occurs.");
-                else
-                    yield return new Paragraph($"{Name} detaches {detachmentConst.Value() * 100}% of its live biomass each day, passing it to the surface organic matter model for decomposition.");
-            }
-            else
-            {
-                yield return new Paragraph("The proportion of Biomass that detaches and is passed to the surface organic matter model for decomposition is quantified by the DetachmentRateFunction.");
-                foreach (ITag tag in detachmentRateFunction.Document())
-                    yield return tag;
-            }
-        }
-
-        private IEnumerable<ITag> DocumentDMDemands()
-        {
-            yield return new Paragraph("The dry matter demand for the organ is calculated as defined in DMDemands, based on the DMDemandFunction and partition fractions for each biomass pool.");
-            foreach (ITag tag in dmDemands.Document())
-                yield return tag;
-        }
-
-        private IEnumerable<ITag> DocumentNDemand()
-        {
-            yield return new Paragraph("The N demand is calculated as defined in NDemands, based on DM demand the N concentration of each biomass pool.");
-            foreach (ITag tag in nDemands.Document())
-                yield return tag;
-        }
-
-        private IEnumerable<ITag> DocumentDMSupply()
-        {
-            if (dmReallocationFactor is Constant dmReallocConst)
-            {
-                if (dmReallocConst.Value() == 0)
-                    yield return new Paragraph($"{Name} does not reallocate DM when senescence of the organ occurs.");
-                else
-                    yield return new Paragraph($"{Name} will reallocate {dmReallocConst.Value() * 100}% of DM that senesces each day.");
-            }
-            else
-            {
-                yield return new Paragraph("The proportion of senescing DM that is allocated each day is quantified by the DMReallocationFactor.");
-                foreach (ITag tag in dmReallocationFactor.Document())
-                    yield return tag;
-            }
-
-            if (dmRetranslocationFactor is Constant dmRetransConst)
-            {
-                if (dmRetransConst.Value() == 0)
-                    yield return new Paragraph($"{Name} does not retranslocate non-structural DM.");
-                else
-                    yield return new Paragraph($"{Name} will retranslocate {dmRetransConst.Value() * 100}% of non-structural DM each day.");
-            }
-            else
-            {
-                yield return new Paragraph("The proportion of non-structural DM that is allocated each day is quantified by the DMReallocationFactor.");
-                foreach (ITag tag in dmRetranslocationFactor.Document())
-                    yield return tag;
-            }
-        }
-
-        private IEnumerable<ITag> DocumentNSupply()
-        {
-            if (nReallocationFactor is Constant nReallocConst)
-            {
-                if (nReallocConst.Value() == 0)
-                    yield return new Paragraph($"{Name} does not reallocate N when senescence of the organ occurs.");
-                else
-                    yield return new Paragraph($"{Name} will reallocate {nReallocConst.Value() * 100}% of N that senesces each day.");
-            }
-            else
-            {
-                yield return new Paragraph("The proportion of senescing N that is allocated each day is quantified by the NReallocationFactor.");
-                foreach (ITag tag in nReallocationFactor.Document())
-                    yield return tag;
-            }
-
-            IModel nRetransFactor = FindChild("NRetranslocationFactor");
-            if (nRetransFactor != null)
-            {
-                if (nRetransFactor is Constant nRetransConst)
-                {
-                    if (nRetransConst.Value() == 0)
-                        yield return new Paragraph($"{Name} does not retranslocate non-structural N.");
-                    else
-                        yield return new Paragraph($"{Name} will retranslocate {nRetransConst.Value() * 100}% of non-structural N each day.");
-                }
-                else
-                {
-                    yield return new Paragraph("The proportion of non-structural N that is allocated each day is quantified by the NReallocationFactor.");
-                    foreach (ITag tag in nRetransFactor.Document())
-                        yield return tag;
-                }
-            }
-        }
     }
 }

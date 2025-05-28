@@ -1,20 +1,19 @@
-﻿namespace Models
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using APSIM.Numerics;
+using APSIM.Shared.Documentation.Extensions;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Logging;
+using Models.Storage;
+
+namespace Models
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.Globalization;
-    using System.IO;
-    using System.Reflection;
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Soils;
-    using Models.Soils.Standardiser;
-    using Models;
-    using Storage;
-    using Logging;
-    using System.Linq;
-    using APSIM.Shared.Documentation.Extensions;
 
     /// <summary>
     /// This model collects the simulation initial conditions and stores into the DataStore.
@@ -23,20 +22,14 @@
     [Serializable]
     [ViewName("UserInterface.Views.SummaryView")]
     [PresenterName("UserInterface.Presenters.SummaryPresenter")]
-    [ValidParent(ParentType=typeof(Simulation))]
+    [ValidParent(ParentType = typeof(Simulation))]
     public class Summary : Model, ISummary
     {
         [NonSerialized]
         private DataTable messages;
 
-        /// <summary>
-        /// The current messages during simulation before saving to db
-        /// </summary>
-        /// <returns>Messages</returns>
-        public DataTable Messages()
-        {
-            return messages;
-        }
+        [NonSerialized]
+        private bool afterCompleted = false;
 
         /// <summary>A link to a storage service</summary>
         [Link]
@@ -44,7 +37,7 @@
 
         /// <summary>A link to the clock in the simulation</summary>
         [Link]
-        private Clock clock = null;
+        private IClock clock = null;
 
         /// <summary>A link to the parent simulation</summary>
         [Link]
@@ -78,6 +71,15 @@
         private void OnCommencing(object sender, EventArgs args)
         {
             messages = null;
+            afterCompleted = false;
+        }
+
+        /// <summary>When the simulation is completed, we need to write all the messages to the datastore.</summary>
+        [EventSubscribe("Completed")]
+        private void OnCompleted(object sender, EventArgs args)
+        {
+            WriteMessagesToDataStore();
+            afterCompleted = true;
         }
 
         /// <summary>Event handler to create initialise</summary>
@@ -89,32 +91,6 @@
             CreateInitialConditionsTable();
         }
 
-        /// <summary>Invoked when a simulation is completed.</summary>
-        /// <param name="sender">Sender of the event</param>
-        /// <param name="e">Event arguments</param>
-        [EventSubscribe("Completed")]
-        private void OnCompleted(object sender, EventArgs e)
-        {
-            // The messages table will be automatically cleaned prior to a simulation
-            // run, so we don't need to delete existing data in this call to WriteTable().
-            if (messages != null)
-                storage?.Writer?.WriteTable(messages, false);
-        }
-
-        /// <summary>Initialise the summary messages table.</summary>
-        private void Initialise()
-        {
-            if (messages == null)
-            {
-                messages = new DataTable("_Messages");
-                messages.Columns.Add("SimulationName", typeof(string));
-                messages.Columns.Add("ComponentName", typeof(string));
-                messages.Columns.Add("Date", typeof(DateTime));
-                messages.Columns.Add("Message", typeof(string));
-                messages.Columns.Add("MessageType", typeof(int));
-            }
-        }
-
         /// <summary>Write a message to the summary</summary>
         /// <param name="author">The model writing the message</param>
         /// <param name="message">The message to write</param>
@@ -123,20 +99,49 @@
         {
             if (Verbosity >= messageType)
             {
-                Initialise();
-
                 if (storage == null)
-                    throw new ApsimXException(author, "No datastore is available!");
-                string modelPath = author.FullPath;
-                string relativeModelPath = modelPath.Replace(simulation.FullPath + ".", string.Empty);
+                {
+                    if (author == null)
+                        throw new Exception("No datastore is available!");
+                    else
+                        throw new ApsimXException(author, "No datastore is available!");
+                }
 
-                var newRow = messages.NewRow();
-                newRow[0] = simulation.Name;
-                newRow[1] = relativeModelPath;
-                newRow[2] = clock.Today;
-                newRow[3] = message;
-                newRow[4] = (int)messageType;
-                messages.Rows.Add(newRow);
+                //set up our messages table if it is null. It will always be null at the start of the simulation.
+                if (messages == null)
+                {
+                    messages = new DataTable("_Messages");
+                    messages.Columns.Add("SimulationName", typeof(string));
+                    messages.Columns.Add("ComponentName", typeof(string));
+                    messages.Columns.Add("Date", typeof(DateTime));
+                    messages.Columns.Add("Message", typeof(string));
+                    messages.Columns.Add("MessageType", typeof(int));
+                }
+
+                // Remove the path of the simulation within the .apsimx file.
+                string relativeModelPath = null;
+                if (author != null)
+                    relativeModelPath = author.FullPath.Replace($"{simulation.FullPath}.", string.Empty);
+
+                DataRow row = messages.NewRow();
+                row[0] = simulation.Name;
+                row[1] = relativeModelPath;
+                row[2] = clock.Today;
+                row[3] = message;
+                row[4] = (int)messageType;
+                messages.Rows.Add(row);
+
+                //This message has come in after the simulation has completed, potentially due to a late event or mis-ordered event
+                if (afterCompleted)
+                    WriteMessagesToDataStore();
+            }
+        }
+
+        /// <summary>Writes all the stored messages to the datastore. At the end of simulation to fill up the datastore.</summary>
+        public void WriteMessagesToDataStore() {
+            if (messages != null) {
+                storage?.Writer?.WriteTable(messages, false);
+                messages = null;
             }
         }
 
@@ -205,22 +210,26 @@
             // run, so we don't need to delete existing data in this call to WriteTable().
             storage.Writer.WriteTable(initConditions, false);
         }
-        
+
         #region Static summary report generation
 
         /// <summary>
-        /// Write a single sumary file for all simulations.
+        /// Write a single summary file for all simulations.
         /// </summary>
         /// <param name="storage">The storage where the summary data is stored</param>
-        /// <param name="fileName">The file name to write</param>           
+        /// <param name="fileName">The file name to write</param>
         /// <param name="darkTheme">Whether or not the dark theme should be used.</param>
         public static void WriteSummaryToTextFiles(IDataStore storage, string fileName, bool darkTheme)
         {
             using (StreamWriter report = new StreamWriter(fileName))
             {
-                foreach (string simulationName in storage.Reader.SimulationNames)
+                //get list of simulations in alphabetical order
+                List<string> names = storage.Reader.SimulationNames;
+                names.Sort();
+
+                foreach (string simulationName in names)
                 {
-                    Summary.WriteReport(storage, simulationName, report, null, outtype: Summary.OutputType.html, darkTheme : darkTheme, true, true, true, true);
+                    Summary.WriteReport(storage, simulationName, report, null, outtype: Summary.OutputType.html, darkTheme: darkTheme, true, true, true, true);
                     report.WriteLine();
                     report.WriteLine();
                     report.WriteLine("############################################################################");
@@ -229,12 +238,14 @@
         }
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
         /// <param name="simulationName"></param>
         public IEnumerable<Message> GetMessages(string simulationName)
         {
             IDataStore storage = this.storage ?? FindInScope<IDataStore>();
+            if (storage == null)
+                yield break;
             DataTable messages = storage.Reader.GetData("_Messages", simulationNames: simulationName.ToEnumerable());
             if (messages == null)
                 yield break;
@@ -253,12 +264,14 @@
         }
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
         /// <param name="simulationName"></param>
         public IEnumerable<InitialConditionsTable> GetInitialConditions(string simulationName)
         {
             IDataStore storage = this.storage ?? FindInScope<IDataStore>();
+            if (storage == null)
+                yield break;
             DataTable table = storage.Reader.GetData("_InitialConditions", simulationNames: simulationName.ToEnumerable());
             if (table == null)
                 yield break;
@@ -340,10 +353,10 @@
 
             }
 
-            // Get the initial conditions table.            
+            // Get the initial conditions table.
             if (showInitialConditions)
             {
-                DataTable initialConditionsTable = storage.Reader.GetData(simulationNames: simulationName.ToEnumerable(), tableName:"_InitialConditions");
+                DataTable initialConditionsTable = storage.Reader.GetData(simulationNames: simulationName.ToEnumerable(), tableName: "_InitialConditions");
                 if (initialConditionsTable != null)
                 {
                     // Convert the '_InitialConditions' table in the DataStore to a series of
@@ -576,7 +589,7 @@
                             st = "Total";
                         else
                             st = row[i].ToString();
-                        
+
                         writer.Write("<td");
                         if (i == 0)
                             writer.Write(" class='col1'");

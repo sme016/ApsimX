@@ -1,14 +1,11 @@
 ﻿using Models.CLEM.Groupings;
 using Models.Core;
 using Models.Core.Attributes;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
+using System;
+using System.ComponentModel.DataAnnotations;
 using System.IO;
+using System.Linq;
 
 namespace Models.CLEM.Resources
 {
@@ -62,11 +59,15 @@ namespace Models.CLEM.Resources
                     htmlWriter.Write("\r\n<div class=\"activityentry\">");
                     if (Value <= 0)
                         htmlWriter.Write("<span class=\"errorlink\">" + Value.ToString() + "</span>");
-                    else if (Value > 0)
-                        htmlWriter.Write("<span class=\"setvalue\">" + Value.ToString() + "</span> x ");
+                    else
+                    {
+                        if (Value > 0)
+                            htmlWriter.Write("<span class=\"setvalue\">" + Value.ToString() + "</span> x ");
+                    }
+
                     htmlWriter.Write(" days available each month</div>");
                 }
-                return htmlWriter.ToString(); 
+                return htmlWriter.ToString();
             }
         }
 
@@ -91,7 +92,7 @@ namespace Models.CLEM.Resources
                 else
                     htmlWriter.Write("\r\n</div>");
 
-                return htmlWriter.ToString(); 
+                return htmlWriter.ToString();
             }
         }
 
@@ -100,14 +101,14 @@ namespace Models.CLEM.Resources
         {
             using (StringWriter htmlWriter = new StringWriter())
             {
-                if (FormatForParentControl)                
-                    htmlWriter.Write("<tr><td>");                
-                else                
-                    htmlWriter.Write("\r\n<div class=\"filterborder clearfix\">");                    
-                
-                if (FindAllChildren<Filter>().Count() < 1)                
+                if (FormatForParentControl)
+                    htmlWriter.Write("<tr><td>");
+                else
+                    htmlWriter.Write("\r\n<div class=\"filterborder clearfix\">");
+
+                if (FindAllChildren<Filter>().Count() < 1)
                     htmlWriter.Write("<div class=\"filter\">Any labour</div>");
-                
+
                 return htmlWriter.ToString();
             }
         }

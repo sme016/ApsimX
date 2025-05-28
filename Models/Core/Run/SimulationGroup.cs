@@ -1,19 +1,20 @@
-﻿namespace Models.Core.Run
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using APSIM.Shared.JobRunning;
+using Models.Core.ApsimFile;
+using Models.PostSimulationTools;
+using Models.Storage;
+
+namespace Models.Core.Run
 {
-    using APSIM.Shared.JobRunning;
-    using Models.Core.ApsimFile;
-    using Models.PostSimulationTools;
-    using Models.Storage;
-    using System;
-    using System.Collections.Generic;
-    using System.IO;
-    using System.Linq;
-    using System.Text.RegularExpressions;
-    using System.Threading;
-    using System.Threading.Tasks;
 
     /// <summary>
-    /// Encapsulates a collection of jobs that are to be run. A job can be a simulation run or 
+    /// Encapsulates a collection of jobs that are to be run. A job can be a simulation run or
     /// a class instance that implements IRunnable e.g. EXCEL input run.
     /// </summary>
     public class SimulationGroup : JobManager, IReportsStatus
@@ -28,7 +29,7 @@
         private bool runSimulations;
 
         /// <summary>Run post simulation tools?</summary>
-        private bool runPostSimulationTools;
+        private bool runPreAndPostSimulationTools;
 
         /// <summary>Run tests?</summary>
         private bool runTests;
@@ -51,22 +52,35 @@
         /// <summary>Contstructor</summary>
         /// <param name="relativeTo">The model to use to search for simulations to run.</param>
         /// <param name="runSimulations">Run simulations?</param>
-        /// <param name="runPostSimulationTools">Run post simulation tools?</param>
+        /// <param name="runPreAndPostSimulationTools">Run post simulation tools?</param>
         /// <param name="runTests">Run tests?</param>
         /// <param name="simulationNamesToRun">Only run these simulations.</param>
         /// <param name="simulationNamePatternMatch">A regular expression used to match simulation names to run.</param>
         public SimulationGroup(IModel relativeTo,
                              bool runSimulations = true,
-                             bool runPostSimulationTools = true,
+                             bool runPreAndPostSimulationTools = true,
                              bool runTests = true,
                              IEnumerable<string> simulationNamesToRun = null,
                              string simulationNamePatternMatch = null)
         {
             this.relativeTo = relativeTo;
             this.runSimulations = runSimulations;
-            this.runPostSimulationTools = runPostSimulationTools;
+            this.runPreAndPostSimulationTools = runPreAndPostSimulationTools;
             this.runTests = runTests;
             this.simulationNamesToRun = simulationNamesToRun;
+
+            if (relativeTo is Playlist) //check if node was a playlist
+            {
+                if ((relativeTo as Playlist).Text.Length > 0)
+                {
+                    this.simulationNamesToRun = (relativeTo as Playlist).GetListOfSimulations();
+                    if (this.simulationNamesToRun == null || this.simulationNamesToRun.Count() == 0)
+                        throw new Exception("Playlist was used but no simulations or experiments match the contents of the list.");
+                }
+                //need to set the relative back to simulations so the runner can find all the simulations
+                //when it comes time to run.
+                this.relativeTo = relativeTo.FindAncestor<Simulations>();
+            }
 
             if (simulationNamePatternMatch != null)
                 patternMatch = new Regex(simulationNamePatternMatch);
@@ -84,7 +98,7 @@
         {
             this.FileName = fileName;
             this.runSimulations = true;
-            this.runPostSimulationTools = true;
+            this.runPreAndPostSimulationTools = true;
             this.runTests = runTests;
 
             if (simulationNamePatternMatch != null)
@@ -106,7 +120,23 @@
         /// I'm not sure that this really belongs here, but since this class
         /// handles the running of post-simulation tools, it kind of has to be here.
         /// </remarks>
-        public string Status { get; private set; }
+        public string Status
+        {
+            get
+            {
+                if (_status.StartsWith("Waiting for datastore"))
+                {
+                    return _status + " - " + storage.Writer.CommandCount().ToString() + " operations remaining";
+                }
+                return _status;
+            }
+            private set
+            {
+                _status = value;
+            }
+        }
+
+        private string _status;
 
         /// <summary>
         /// List all simulation names beneath a given model.
@@ -126,6 +156,9 @@
                 return new List<string>();
 
             IEnumerable<ISimulationDescriptionGenerator> allSims = rootModel.FindAllDescendants<ISimulationDescriptionGenerator>();
+
+            //remove any sims there are under replacements
+            allSims = allSims.Where(s => Folder.IsUnderReplacementsFolder((s as IModel)) == null);
 
             List<string> dupes = new List<string>();
             foreach (var simType in allSims.GroupBy(s => s.GetType()))
@@ -147,21 +180,34 @@
 
             if (storage?.Writer != null)
                 storage.Writer.TablesModified.Clear();
+
+            if (runPreAndPostSimulationTools)
+            {
+                RunPreSimulationTools();
+                StorageFinishWriting();
+            }
         }
 
         /// <summary>Called once when all jobs have completed running. Should throw on error.</summary>
         protected override void PostAllRuns()
         {
             Status = "Waiting for datastore to finish writing";
-            storage?.Writer.Stop();
-            storage?.Reader.Refresh();
+            StorageFinishWriting();
 
-            if (runPostSimulationTools)
+            if (runPreAndPostSimulationTools)
                 RunPostSimulationTools();
 
             if (runTests)
                 RunTests();
 
+            StorageFinishWriting();
+        }
+
+        /// <summary>
+        /// Tell the datastore to finish writing.
+        /// </summary>
+        public void StorageFinishWriting()
+        {
             storage?.Writer.Stop();
             storage?.Reader.Refresh();
         }
@@ -179,7 +225,7 @@
 
                     if (!File.Exists(FileName))
                         throw new Exception("Cannot find file: " + FileName);
-                    Simulations sims = FileFormat.ReadFromFile<Simulations>(FileName, e => throw e, false);
+                    Simulations sims = FileFormat.ReadFromFile<Simulations>(FileName, e => throw e, false).NewModel as Simulations;
                     relativeTo = sims;
                 }
 
@@ -214,6 +260,19 @@
                     if (duplicates != null && duplicates.Any())
                         throw new Exception($"Duplicate simulation names found: {string.Join(", ", duplicates)}");
 
+                    // Check for duplicate soils
+                    foreach (var zone in rootModel.FindAllDescendants<Zone>().Where(z => z.Enabled))
+                    {
+                        bool duplicateSoils = zone.FindAllChildren<Models.Soils.Soil>().Where(s => s.Enabled).Count() > 1;
+                        if (duplicateSoils)
+                            throw new Exception($"Duplicate soils found in zone: {zone.FullPath}");
+                    }
+
+                    //check if a manager scripts needs compiling
+                    foreach (Manager manager in relativeTo.FindAllDescendants<Manager>().ToList())
+                        if (!manager.SuccessfullyCompiledLast)
+                            manager.RebuildScriptModel();
+
                     // Publish BeginRun event.
                     var e = new Events(rootModel);
                     e.Publish("BeginRun", new object[] { this, new EventArgs() });
@@ -243,9 +302,9 @@
                         foreach (IRunnable job in jobs)
                             Add(job);
                     }
-                    
+
                     if (numJobsToRun == 0)
-                       Add(new EmptyJob());
+                        Add(new EmptyJob());
                 }
             }
             catch (Exception readException)
@@ -274,7 +333,7 @@
                     if (SimulationNameIsMatched(description.Name))
                         yield return description;
             }
-            else if (relativeTo is Folder || relativeTo is Simulations)
+            else if ((relativeTo is Folder && !Folder.IsModelReplacementsFolder(relativeTo)) || relativeTo is Simulations)
             {
                 // Get a list of all models we're going to run.
                 foreach (var child in relativeTo.Children)
@@ -294,6 +353,41 @@
                 return patternMatch.Match(simulationName).Success;
             else
                 return simulationNamesToRun == null || simulationNamesToRun.Contains(simulationName);
+        }
+
+        /// <summary>Run all pre simulation tools.</summary>
+        private void RunPreSimulationTools()
+        {
+            // Call all pre simulation tools.
+            foreach (IPreSimulationTool tool in FindPreSimulationTools())
+            {
+                storage?.Writer.WaitForIdle();
+                storage?.Reader.Refresh();
+                try
+                {
+                    if (tool.Enabled)
+                    {
+                        Status = $"Running pre-simulation tool {(tool as IModel).Name}";
+                        if (rootModel is Simulations)
+                        {
+                            (rootModel as Simulations).ParentAllDescendants();
+                            (rootModel as Simulations).Links.Resolve(rootModel, true, true, false);
+                        }
+                        tool.Run();
+                    }
+                }
+                catch (Exception err)
+                {
+                    AddException(err);
+                }
+            }
+        }
+
+        private IEnumerable<IPreSimulationTool> FindPreSimulationTools()
+        {
+            return relativeTo.FindAllInScope<IPreSimulationTool>()
+                            .Where(t => t.FindAllAncestors()
+                                         .All(a => !(a is ParallelPostSimulationTool || a is SerialPostSimulationTool)));
         }
 
         /// <summary>Run all post simulation tools.</summary>
@@ -358,13 +452,14 @@
             }
 
             var links = new Links(services);
-            foreach (ITest test in rootModel.FindAllDescendants<ITest>())
+            foreach (ITest test in rootModel.FindAllDescendants<ITest>()
+                                            .Where(t => t.Enabled))
             {
                 DateTime startTime = DateTime.Now;
 
                 links.Resolve(test as IModel, true);
-                
-                // If we run into problems, we will want to include the name of the test in the 
+
+                // If we run into problems, we will want to include the name of the test in the
                 // exception's message. However, tests may be manager scripts, which always have
                 // a name of 'Script'. Therefore, if the test's parent is a Manager, we use the
                 // manager's name instead.
@@ -378,7 +473,7 @@
                 catch (Exception err)
                 {
                     exception = err;
-                    AddException(new Exception("Encountered an error while running test " + testName, err));
+                    AddException(new Exception("Encountered an error while running test " + testName + " (" + FileName + ")", err));
                 }
             }
         }

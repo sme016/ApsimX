@@ -41,7 +41,7 @@ namespace UnitTests.Resources
                     int version = (int)root["Version"];
                     Assert.That(version == Converter.LatestVersion, $"Resource '{resourceName}' is not up to date - version is {version} but latest version is {Converter.LatestVersion}.");
 
-                    IModel model = FileFormat.ReadFromString<IModel>(resource, e => throw e, false);
+                    IModel model = FileFormat.ReadFromString<IModel>(resource, e => throw e, false).NewModel as IModel;
                     Assert.That(model is Simulations, $"Resource '{resourceName}' does not contain a top-level simulations node.");
 
                     int simulationsVersion = (model as Simulations).Version;
@@ -59,7 +59,7 @@ namespace UnitTests.Resources
         public void EnsureReleasedModelsAreNotSaved()
         {
             string json = ReflectionUtilities.GetResourceAsString("UnitTests.Resources.WheatModel.apsimx");
-            IModel topLevel = FileFormat.ReadFromString<Simulations>(json, e => throw e, false);
+            IModel topLevel = FileFormat.ReadFromString<Simulations>(json, e => throw e, false).NewModel as IModel;
             string serialized = FileFormat.WriteToString(topLevel);
 
             JObject root = JObject.Parse(serialized);
@@ -70,13 +70,13 @@ namespace UnitTests.Resources
 
             // The wheat model under replacements should have its full
             // model structure (properties + children) serialized.
-            Assert.NotNull(fullWheat);
-            Assert.AreNotEqual(0, JsonUtilities.Children(fullWheat).Count);
+            Assert.That(fullWheat, Is.Not.Null);
+            Assert.That(JsonUtilities.Children(fullWheat).Count, Is.Not.EqualTo(0));
 
             // The wheat model under the folder should *not* have its
             // full model structure (properties + children) serialized.
-            Assert.NotNull(wheat);
-            Assert.AreEqual(0, JsonUtilities.Children(wheat).Count);
+            Assert.That(wheat, Is.Not.Null);
+            Assert.That(JsonUtilities.Children(wheat).Count, Is.EqualTo(0));
         }
     }
 }

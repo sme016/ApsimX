@@ -24,7 +24,7 @@ namespace UnitTests.Interop.Markdown.Parsers.Inlines
         public void Setup()
         {
             parser = new ReferenceInlineParser();
-            Mock<InlineProcessor> mockProcessor = new Mock<InlineProcessor>(new MarkdownDocument(), new InlineParserList(new InlineParser[0]), false, new MarkdownParserContext());
+            Mock<InlineProcessor> mockProcessor = new Mock<InlineProcessor>(new MarkdownDocument(), new InlineParserList(new InlineParser[0]), false, new MarkdownParserContext(), false);
             processor = mockProcessor.Object;
         }
 
@@ -40,11 +40,11 @@ namespace UnitTests.Interop.Markdown.Parsers.Inlines
         {
             StringSlice slice = new StringSlice($"[{reference}]");
             bool result = parser.Match(processor, ref slice);
-            Assert.True(result);
-            Assert.NotNull(processor.Inline);
-            Assert.AreEqual(typeof(ReferenceInline), processor.Inline.GetType());
+            Assert.That(result, Is.True);
+            Assert.That(processor.Inline, Is.Not.Null);
+            Assert.That(processor.Inline.GetType(), Is.EqualTo(typeof(ReferenceInline)));
             ReferenceInline inline = (ReferenceInline)processor.Inline;
-            Assert.AreEqual(reference, inline.ReferenceName);
+            Assert.That(inline.ReferenceName, Is.EqualTo(reference));
         }
 
         /// <summary>
@@ -58,8 +58,8 @@ namespace UnitTests.Interop.Markdown.Parsers.Inlines
         {
             StringSlice slice = new StringSlice(contents);
             bool result = parser.Match(processor, ref slice);
-            Assert.False(result);
-            Assert.Null(processor.Inline);
+            Assert.That(result, Is.False);
+            Assert.That(processor.Inline, Is.Null);
         }
 
         [Test]

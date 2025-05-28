@@ -1,10 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Reflection;
 using Models.Core;
-using Newtonsoft.Json;
-using APSIM.Shared.Documentation;
 
 namespace Models.Functions
 {
@@ -21,7 +16,7 @@ namespace Models.Functions
         [Link(Type = LinkType.Child, ByName = true)]
         IFunction Ymax = null;
         /// <summary>The x value</summary>
-        [Link(Type = LinkType.Child, ByName = true, IsOptional =true)]
+        [Link(Type = LinkType.Child, ByName = true, IsOptional = true)]
         IFunction XValue = null;
         /// <summary>The Xo</summary>
         [Link(Type = LinkType.Child, ByName = true)]
@@ -45,7 +40,7 @@ namespace Models.Functions
         {
             try
             {
-                return Ymax.Value(-1) * 1 / (1 + Math.Exp(-(dX - Xo.Value(-1)) / b.Value(-1)));
+                return Ymax.Value(-1) * Function(dX, Xo.Value(-1), b.Value(-1));
             }
             catch (Exception)
             {
@@ -53,32 +48,17 @@ namespace Models.Functions
             }
         }
 
+
         /// <summary>
-        /// Document the model.
+        /// General sigmoid function
         /// </summary>
-        public override IEnumerable<ITag> Document()
+        /// <param name="dX"></param>
+        /// <param name="Xo"></param>
+        /// <param name="b"></param>
+        /// <returns></returns>
+        public double Function(double dX, double Xo, double b)
         {
-            yield return new Paragraph($"{Name} is calcualted using a sigmoid function of the form y = Ymax * 1 / 1 + e^-(Xvalue - Xo) / b^.");
-
-            // Document Ymax.
-            yield return new Paragraph($"{nameof(Ymax)} is calculated as:");
-            foreach (ITag tag in Ymax.Document())
-                yield return tag;
-
-            // Document x0.
-            yield return new Paragraph($"{nameof(Xo)} is calculated as:");
-            foreach (ITag tag in Xo.Document())
-                yield return tag;
-
-            // Document b.
-            yield return new Paragraph($"{nameof(b)} is calculated as:");
-            foreach (ITag tag in b.Document())
-                yield return tag;
-
-            // Document x value.
-            yield return new Paragraph($"{nameof(XValue)} is calculated as:");
-            foreach (ITag tag in XValue.Document())
-                yield return tag;
+            return 1 / (1 + Math.Exp(-(dX - Xo) / b));
         }
     }
 }

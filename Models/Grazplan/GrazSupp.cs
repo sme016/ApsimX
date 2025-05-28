@@ -1,15 +1,16 @@
 ﻿// -----------------------------------------------------------------------
 // The GrazPlan Supplement objects
 // -----------------------------------------------------------------------
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Newtonsoft.Json;
 
 namespace Models.GrazPlan
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Linq;
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Newtonsoft.Json;
 
     /// <summary>
     /// Class containing some common routine for dealing with parameter sets
@@ -85,7 +86,11 @@ namespace Models.GrazPlan
         public static string DefaultLocale()
         {
             string loc = null;
+#if NET6_0_OR_GREATER
+            if (OperatingSystem.IsWindows())
+#else
             if (ProcessUtilities.CurrentOS.IsWindows)
+#endif
             {
                 Microsoft.Win32.RegistryKey regKey = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(PARAMKEY);
                 if (regKey != null)
@@ -603,12 +608,12 @@ namespace Models.GrazPlan
             }
         }
 
-        // ConvertDMD_To_ME2DM                                                          
-        // ConvertME2DM_To_DMD                                                          
-        // Routines for default conversions between M/D and DMD                         
-        //   fDMD       Dry matter digestibility  (0-1)                                 
-        //   fME2DM     M/D ratio                 (MJ/kg)                               
-        //   fEE        Ether-extractable content (0-1)                                 
+        // ConvertDMD_To_ME2DM
+        // ConvertME2DM_To_DMD
+        // Routines for default conversions between M/D and DMD
+        //   fDMD       Dry matter digestibility  (0-1)
+        //   fME2DM     M/D ratio                 (MJ/kg)
+        //   fEE        Ether-extractable content (0-1)
 
         /// <summary>
         /// Routine for default conversion from DMD to M/D
@@ -658,7 +663,7 @@ namespace Models.GrazPlan
                 IsRoughage = supp2.IsRoughage;
             double propn2 = 1.0 - propn1;                                  // Proportion of suppt 2 on a FW basis
             double dmpropn1 = MathUtilities.Divide(propn1 * supp1.DMPropn, (propn1 * supp1.DMPropn) + (propn2 * supp2.DMPropn), 0.0);  // Proportion of suppt 1 on a DM basis
-            double dmpropn2 = 1.0 - dmpropn1;                              // Proportion of suppt 2 on a DM basis 
+            double dmpropn2 = 1.0 - dmpropn1;                              // Proportion of suppt 2 on a DM basis
 
             double CPpropn1;                                               // Proportion of suppt 1 on a total CP basis
             if ((propn1 * supp1.DMPropn * supp1.CrudeProt) + (propn2 * supp2.DMPropn * supp2.CrudeProt) > 0.0)
@@ -974,23 +979,23 @@ namespace Models.GrazPlan
         }
 
         /// <summary>
-        /// Populates fields of this FoodSupplement from a SuppToStockType                            
+        /// Populates fields of this FoodSupplement from a SuppToStockType
         /// </summary>
         /// <param name="value">The supp to stock value</param>
         public void SetSuppAttrs(SuppToStockType value)
         {
-            this.IsRoughage = value.IsRoughage;         // "roughage"                            
-            this.DMPropn = value.DMContent;             // "dm_content"                          
-            this.DMDigestibility = value.DMD;           // "dmd"                                 
-            this.ME2DM = value.MEContent;               // "me_content"                          
-            this.CrudeProt = value.CPConc;              // "cp_conc"                             
-            this.DegProt = value.ProtDg;                // "prot_dg"                             
-            this.Phosphorus = value.PConc;              // "p_conc"                              
-            this.Sulphur = value.SConc;                 // "s_conc"                              
-            this.EtherExtract = value.EEConc;           // "ee_conc"                             
-            this.ADIP2CP = value.ADIP2CP;               // "adip2cp"                             
-            this.AshAlkalinity = value.AshAlk;          // "ash_alk"                             
-            this.MaxPassage = value.MaxPassage;         // "max_passage"                         
+            this.IsRoughage = value.IsRoughage;         // "roughage"
+            this.DMPropn = value.DMContent;             // "dm_content"
+            this.DMDigestibility = value.DMD;           // "dmd"
+            this.ME2DM = value.MEContent;               // "me_content"
+            this.CrudeProt = value.CPConc;              // "cp_conc"
+            this.DegProt = value.ProtDg;                // "prot_dg"
+            this.Phosphorus = value.PConc;              // "p_conc"
+            this.Sulphur = value.SConc;                 // "s_conc"
+            this.EtherExtract = value.EEConc;           // "ee_conc"
+            this.ADIP2CP = value.ADIP2CP;               // "adip2cp"
+            this.AshAlkalinity = value.AshAlk;          // "ash_alk"
+            this.MaxPassage = value.MaxPassage;         // "max_passage"
         }
 
         /// <summary>
@@ -1364,7 +1369,7 @@ namespace Models.GrazPlan
         {
             Array attribs = Enum.GetValues(typeof(FoodSupplement.SuppAttribute));
 
-            // NB this only works because of the way the supplement attributes are ordered 
+            // NB this only works because of the way the supplement attributes are ordered
             // i.e. DM proportion first and CP before dg and ADIP:CP
             foreach (FoodSupplement.SuppAttribute attr in attribs)
             {
@@ -1663,7 +1668,11 @@ namespace Models.GrazPlan
         /// <returns>True if this locale is found</returns>
         public bool ReadFromRegistryFile(string locale)
         {
+#if NET6_0_OR_GREATER
+            if (OperatingSystem.IsWindows())
+#else
             if (ProcessUtilities.CurrentOS.IsWindows)
+#endif
             {
                 Microsoft.Win32.RegistryKey regKey = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(GrazParam.PARAMKEY);
                 if (regKey != null)

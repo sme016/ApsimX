@@ -1,13 +1,8 @@
 ﻿using System;
-using System.Reflection;
-using System.Collections.Generic;
-using System.Text;
-using System.Xml;
+using APSIM.Numerics;
 using APSIM.Shared.Utilities;
-using Models.Interfaces;
 using Models.Core;
-using Models;
-using Models.Soils;
+using Models.Interfaces;
 
 namespace Models.Soils
 {
@@ -23,15 +18,18 @@ namespace Models.Soils
         IWeather weather = null;
 
         [Link]
-        Clock clock = null;
+        IClock clock = null;
 
         /// <summary>The water balance model</summary>
         [Link]
         ISoilWater waterBalance = null;
 
         /// <summary>Access the soil physical properties.</summary>
-        [Link] 
+        [Link]
         private IPhysical soilPhysical = null;
+
+        /// <summary>Invoke when the soil temperature has changed.</summary>
+        public event EventHandler SoilTemperatureChanged;
 
         #region Parameters and inputs provided by the user or APSIM
 
@@ -133,8 +131,26 @@ namespace Models.Soils
                 surf_temp[day] = ave_temp;
         }
 
-        /// <summary>Returns soil temperature for each layer (oc)</summary>
+        /// <summary>Soil temperature for each layer (oC)</summary>
         public double[] Value { get { return st; } }
+
+        /// <summary>Average soil temperature for each layer (oC)</summary>
+        public double[] AverageSoilTemperature { get { return st; } }
+
+        /// <summary>Average soil temperature for soil surface (oC)</summary>
+        public double AverageSoilSurfaceTemperature { get { return double.NaN; } }
+
+        /// <summary>Average soil temperature for each layer (oC)</summary>
+        public double[] MinimumSoilTemperature { get { return st; } }
+
+        /// <summary>Average soil temperature for soil surface (oC)</summary>
+        public double MinimumSoilSurfaceTemperature { get { return double.NaN; } }
+
+        /// <summary>Average soil temperature for each layer (oC)</summary>
+        public double[] MaximumSoilTemperature { get { return st; } }
+
+        /// <summary>Average soil temperature for soil surface (oC)</summary>
+        public double MaximumSoilSurfaceTemperature { get { return double.NaN; } }
 
         /// <summary>Called to perform soil temperature calculations</summary>
         /// <param name="sender">The sender.</param>
@@ -173,7 +189,7 @@ namespace Models.Soils
                 alx = ang * _today.AddDays(-(int)sth_hot).DayOfYear;
 
             // RCichota: had to cast nth_hot and sth_hot to integer due to differences in how DayOfYear are handled in here as compared to the fortran version
-            //  there was a one day offset for sth_hot. Ex.:  
+            //  there was a one day offset for sth_hot. Ex.:
             //  if today = 1-Jan and sht_hot = 382.625, fortran gives day of year = 349, while here, without casting, we get 348
 
             if (alx < 0.0 || alx > 6.31)
@@ -200,6 +216,8 @@ namespace Models.Soils
                 if (st[layer] < -50.0 || st[layer] > 80.0)
                     throw new Exception("Value for soil_temp is out of range");
             }
+
+            SoilTemperatureChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private double dlt_temp(double alx)
@@ -253,8 +271,8 @@ namespace Models.Soils
         private double DampDepth()
         {
             // + Purpose
-            //      Now get the temperature damping depth. 
-            //       This is a function of the average soil bulk density and the amount of water above the lower limit. 
+            //      Now get the temperature damping depth.
+            //       This is a function of the average soil bulk density and the amount of water above the lower limit.
 
             //+  Notes
             //     241091 consulted Brian Wall.  For soil temperature an estimate of the water content of the total profile is required,

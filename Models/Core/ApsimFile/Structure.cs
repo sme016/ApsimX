@@ -1,12 +1,10 @@
-﻿namespace Models.Core.ApsimFile
+﻿using System;
+using System.Linq;
+using System.Xml;
+using Models.Core.Apsim710File;
+
+namespace Models.Core.ApsimFile
 {
-    using System;
-    using System.Collections.Generic;
-    using Models.Core.Apsim710File;
-    using System.Linq;
-    using System.Text;
-    using System.Threading.Tasks;
-    using System.Xml;
 
     /// <summary>
     /// A collection of methods for manipulating the structure of an .apsimx file.
@@ -28,13 +26,21 @@
 
             modelToAdd.Parent = parent;
             modelToAdd.ParentAllDescendants();
-            parent.Children.Add(modelToAdd);
 
             // Ensure the model name is valid.
             EnsureNameIsUnique(modelToAdd);
 
-            // Call OnCreated
+            if(parent.IsChildAllowable(modelToAdd.GetType()))
+            {
+                parent.Children.Add(modelToAdd);
+            }
+            else throw new ArgumentException($"A {modelToAdd.GetType().Name} cannot be added to a {parent.GetType().Name}.");
+
+            //Do error checking on model if it's a Replacements folder
+            Folder.IsModelReplacementsFolder(modelToAdd);
+
             modelToAdd.OnCreated();
+
             foreach (IModel model in modelToAdd.FindAllDescendants().ToList())
                 model.OnCreated();
 
@@ -43,9 +49,12 @@
             if (parentSimulation != null && parentSimulation.IsRunning)
             {
                 var links = new Links(parentSimulation.Services);
-                links.Resolve(modelToAdd, true);
+                links.Resolve(modelToAdd, true, throwOnFail: true);
                 var events = new Events(modelToAdd);
                 events.ConnectEvents();
+
+                // Publish Commencing event
+                events.PublishToModelAndChildren("Commencing", new object[] { parent, new EventArgs() });
 
                 // Call StartOfSimulation events
                 events.PublishToModelAndChildren("StartOfSimulation", new object[] { parent, new EventArgs() });
@@ -67,7 +76,7 @@
             IModel modelToAdd = null;
             try
             {
-                modelToAdd = FileFormat.ReadFromString<IModel>(st, e => throw e, false);
+                modelToAdd = FileFormat.ReadFromString<IModel>(st, e => throw e, false).NewModel as IModel;
             }
             catch (Exception err)
             {
@@ -85,7 +94,7 @@
                 var convertedNode = importer.AddComponent(rootNode.ChildNodes[0], ref rootNode);
                 rootNode.RemoveAll();
                 rootNode.AppendChild(convertedNode);
-                var newSimulationModel = FileFormat.ReadFromString<IModel>(rootNode.OuterXml, e => throw e, false);
+                var newSimulationModel = FileFormat.ReadFromString<IModel>(rootNode.OuterXml, e => throw e, false).NewModel as IModel;
                 if (newSimulationModel == null || newSimulationModel.Children.Count == 0)
                     throw new Exception("Cannot add model. Invalid model being added.");
                 modelToAdd = newSimulationModel.Children[0];
@@ -93,13 +102,6 @@
 
             // Correctly parent all models.
             modelToAdd = Add(modelToAdd, parent);
-
-            // Ensure the model name is valid.
-            EnsureNameIsUnique(modelToAdd);
-
-            // Call OnCreated
-            foreach (IModel model in modelToAdd.FindAllDescendants().ToList())
-                model.OnCreated();
 
             return modelToAdd;
         }
@@ -110,8 +112,15 @@
         /// <returns>The newly created model.</returns>
         public static void Rename(IModel model, string newName)
         {
-            model.Name = newName;
-            EnsureNameIsUnique(model);
+            //use a clone to see if the name is good
+            IModel clone = model.Clone();
+            clone.Name = newName;
+            clone.Parent = model.Parent;
+            model.Name = ""; //rename the existing model so it doesn't conflict
+            EnsureNameIsUnique(clone);
+
+            //set the name to whatever was found using the clone.
+            model.Name = clone.Name.Trim();
             Apsim.ClearCaches(model);
         }
 
@@ -127,9 +136,9 @@
                 // The models in scope will be different after the move so we will
                 // need to do this again after we move the model.
                 Apsim.ClearCaches(model);
+                EnsureNameIsUnique(model);
                 newParent.Children.Add(model as Model);
                 model.Parent = newParent;
-                EnsureNameIsUnique(model);
                 Apsim.ClearCaches(model);
             }
             else
@@ -152,8 +161,35 @@
                 newName = originalName + counter.ToString();
                 siblingWithSameName = modelToCheck.FindSibling(newName);
             }
+            Simulations sims = modelToCheck.FindAncestor<Simulations>();
+            if (sims != null)
+            {
+                bool stop = false;
+                while (!stop && counter < 10000)
+                {
+                    bool goodName = true;
 
-            if (counter == 1000)
+                    var obj = sims.FindByPath(modelToCheck.Parent.FullPath + "." + newName);
+                    if (obj != null) { //found a potential conflict
+                        goodName = false;
+                        if (obj is IVariable variable) //name is a variable, check if they have the same type (aka a link)
+                            if (variable.DataType.Name.CompareTo(modelToCheck.GetType().Name) == 0)
+                                if (modelToCheck.FindSibling(newName) == null)
+                                    goodName = true;
+                    }
+
+                    if (goodName == false)
+                    {
+                        counter++;
+                        newName = originalName + counter.ToString();
+                    }
+                    else
+                    {
+                        stop = true;
+                    }
+                }
+            }
+            if (counter == 10000)
             {
                 throw new Exception("Cannot create a unique name for model: " + originalName);
             }
@@ -167,6 +203,42 @@
         {
             Apsim.ClearCaches(model);
             return model.Parent.Children.Remove(model as Model);
+        }
+
+        /// <summary>Replace one model with another.</summary>
+        /// <param name="modelToReplace">The old model to replace.</param>
+        /// <param name="replacement">The new model.</param>
+        public static IModel Replace(IModel modelToReplace, IModel replacement)
+        {
+            IModel newModel = Apsim.Clone(replacement);
+            int index = modelToReplace.Parent.Children.IndexOf(modelToReplace as Model);
+            modelToReplace.Parent.Children[index] = newModel;
+            newModel.Parent = modelToReplace.Parent;
+            newModel.Name = modelToReplace.Name;
+            newModel.Enabled = modelToReplace.Enabled;
+
+            // Remove existing model from parent.
+            modelToReplace.Parent = null;
+
+            // If a resource model (e.g. maize) is copied into replacements, and its
+            // property values changed, these changed values will be overriden with the
+            // 'accepted' values from the official maize model when the simulation is
+            // run, because the model's resource name is not null. This can be manually
+            // rectified by editing the json, but such an intervention shouldn't be
+            // necessary.
+            newModel.ResourceName = null;
+
+            Apsim.ClearCaches(modelToReplace);
+
+            // Don't call newModel.Parent.OnCreated(), because if we're replacing
+            // a child of a resource model, the resource model's OnCreated event
+            // will make it reread the resource string and replace this child with
+            // the 'official' child from the resource.
+            newModel.OnCreated();
+            foreach (var model in newModel.FindAllDescendants().ToList())
+                model.OnCreated();
+                
+            return newModel;
         }
     }
 }

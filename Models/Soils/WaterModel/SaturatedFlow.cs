@@ -1,33 +1,32 @@
-﻿
+﻿using System;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Soils;
+using Newtonsoft.Json;
+
 namespace Models.WaterModel
 {
-    using APSIM.Shared.Utilities;
-    using Core;
-    using System;
-    using Newtonsoft.Json;
-    using Models.Soils;
 
     /// <summary>
-    /// When water content in any layer is below SAT but above DUL, a fraction of the water drains to the next 
-    /// deepest layer each day. 
-    /// 
+    /// When water content in any layer is below SAT but above DUL, a fraction of the water drains to the next
+    /// deepest layer each day.
+    ///
     /// Flux = SWCON x (SW - DUL)
-    /// 
-    /// Infiltration or water movement into any layer that exceeds the saturation capacity of the layer automatically 
+    ///
+    /// Infiltration or water movement into any layer that exceeds the saturation capacity of the layer automatically
     /// cascades to the next layer.
     /// </summary>
     [Serializable]
-    [ViewName("UserInterface.Views.ProfileView")]
-    [PresenterName("UserInterface.Presenters.ProfilePresenter")]
     [ValidParent(ParentType = typeof(WaterBalance))]
     public class SaturatedFlowModel : Model
     {
         /// <summary>The water movement model.</summary>
         [Link]
         private WaterBalance soil = null;
-        
+
         /// <summary>Access the soil physical properties.</summary>
-        [Link] 
+        [Link]
         private IPhysical soilPhysical = null;
 
         /// <summary>Amount of water (mm) backed up.</summary>
@@ -70,19 +69,19 @@ namespace Models.WaterModel
                         w_excess = 0.0;
 
                     // Calculate water draining by gravity (mm) (between SAT and DUL)
-                    double w_drain;               
+                    double w_drain;
                     if (w_tot > DUL[i])
                         w_drain = (w_tot - DUL[i]) * soil.SWCON[i];
                     else
                         w_drain = 0.0;
 
                     // Calculate EXCESS Flow and DRAIN Flow (combined into Flux)
-                    // if there is EXCESS Amount, 
+                    // if there is EXCESS Amount,
                     if (w_excess > 0.0)
                     {
-                        if (soilPhysical.KS == null)
+                        if (soilPhysical.KS == null || soilPhysical.KS.Length == 0)
                         {
-                            //! all this excess goes on down 
+                            //! all this excess goes on down
                             w_out = w_excess + w_drain;
                             flux[i] = w_out;
                         }
@@ -105,7 +104,7 @@ namespace Models.WaterModel
                             // Starting from the layer above the current layer,
                             // Move up to the surface, layer by layer and use the
                             // backup to fill the space still remaining between
-                            // the new sw_dep (that you calculated on the way down) 
+                            // the new sw_dep (that you calculated on the way down)
                             // and sat for that layer. Once the backup runs out
                             // it will keep going but you will be adding 0.
                             if (i > 0)
@@ -124,7 +123,7 @@ namespace Models.WaterModel
                     }
                     else
                     {
-                        // there is no EXCESS Amount so only do DRAIN Flow   
+                        // there is no EXCESS Amount so only do DRAIN Flow
                         w_out = w_drain;
                         flux[i] = w_drain;
                         newSWmm[i] = SW[i] + w_in - w_out;

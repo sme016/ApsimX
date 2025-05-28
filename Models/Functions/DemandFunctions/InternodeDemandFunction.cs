@@ -1,8 +1,6 @@
-﻿using APSIM.Shared.Documentation;
+﻿using System;
 using Models.Core;
 using Models.PMF.Struct;
-using System;
-using System.Collections.Generic;
 
 namespace Models.Functions.DemandFunctions
 {
@@ -24,16 +22,5 @@ namespace Models.Functions.DemandFunctions
         {
             return Structure.DeltaTipNumber * Structure.TotalStemPopn * InterNodeWt.Value(arrayIndex);
         }
-
-        /// <summary>Document the model.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // Write description of this class from summary and remarks XML documentation.
-            foreach (var tag in GetModelDescription())
-                yield return tag;
-
-            foreach (var tag in DocumentChildren<IModel>())
-                yield return tag;
-        }
     }
-}   
+}

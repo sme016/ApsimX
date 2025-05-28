@@ -1,5 +1,4 @@
 ﻿using System;
-using APSIM.Shared.Documentation;
 using System.Collections.Generic;
 using System.Linq;
 using Models.Core;
@@ -18,7 +17,7 @@ namespace Models.Functions
     {
         ///Links
         /// -----------------------------------------------------------------------------------------------------------
-        
+
         /// <summary>Link to an event service.</summary>
         [Link]
         private IEvent events = null;
@@ -42,10 +41,12 @@ namespace Models.Functions
         /// -----------------------------------------------------------------------------------------------------------
         /// <summary>The start stage name</summary>
         [Description("Stage name to start accumulation")]
+        [Display(Type = DisplayType.CropStageName)]
         public string StartStageName { get; set; }
 
         /// <summary>The end stage name</summary>
         [Description("Stage name to stop accumulation")]
+        [Display(Type = DisplayType.CropStageName)]
         public string EndStageName { get; set; }
 
         /// <summary>The end stage name</summary>
@@ -61,14 +62,6 @@ namespace Models.Functions
             return accumulatedValue;
         }
 
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            yield return new Paragraph($"**{Name}** is a daily accumulation of the values of functions listed below between the {StartStageName} and {EndStageName} stages. Function values added to the accumulate total each day are:");
-        }
-
         ///7. Private methods
         /// -----------------------------------------------------------------------------------------------------------
 
@@ -82,7 +75,7 @@ namespace Models.Functions
         {
             events.Subscribe(AccumulateEventName, OnCalcEvent);
         }
-        
+
         /// <summary>Called when [simulation commencing].</summary>
         /// <param name="sender">The sender.</param>
         /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
@@ -113,6 +106,15 @@ namespace Models.Functions
 
                 accumulatedValue += DailyIncrement;
             }
+        }
+
+        /// <summary>Called when [EndCrop].</summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+        [EventSubscribe("PlantEnding")]
+        private void OnPlantEnding(object sender, EventArgs e)
+        {
+            accumulatedValue = 0;
         }
     }
 }

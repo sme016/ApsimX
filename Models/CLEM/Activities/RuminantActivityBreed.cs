@@ -1,16 +1,19 @@
 using Models.Core;
-using Models.CLEM.Groupings;
 using Models.CLEM.Resources;
-using StdUnits;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
 using Models.Core.Attributes;
 using System.Globalization;
 using System.IO;
 using Newtonsoft.Json;
+using APSIM.Shared.Utilities;
+using Models.CLEM.Interfaces;
+using Models.CLEM.Reporting;
+using Models.CLEM.Groupings;
+using System.Xml;
+using APSIM.Numerics;
 
 namespace Models.CLEM.Activities
 {
@@ -38,16 +41,15 @@ namespace Models.CLEM.Activities
     public class RuminantActivityBreed : CLEMRuminantActivityBase
     {
         [Link]
-        private Clock clock = null;
-
-        private Dictionary<string, IIndividualAttribute> randomHerdAttributes = new Dictionary<string, IIndividualAttribute>();
+        private IClock clock = null;
 
         /// <summary>
         /// Artificial insemination in use (defined by presence of add-on component)
         /// </summary>
-        private bool useControlledMating { get { return (controlledMating != null); }  }
+        private bool useControlledMating { get { return (controlledMating != null && controlledMating.ActivityEnabled); }  }
 
         private RuminantActivityControlledMating controlledMating = null;
+        private ConceptionStatusChangedEventArgs conceptionArgs = new ConceptionStatusChangedEventArgs();
 
         /// <summary>
         /// Records the number of individuals that conceived in the BreedingEvent for sub-components to work with.
@@ -60,14 +62,6 @@ namespace Models.CLEM.Activities
         [Description("Infer pregnancy status at startup")]
         [Required]
         public bool InferStartupPregnancy { get; set; }
-
-        /// <summary>
-        /// Constructor
-        /// </summary>
-        public RuminantActivityBreed()
-        {
-            TransactionCategory = "Livestock.Manage";
-        }
 
         /// <summary>An event handler to allow us to initialise ourselves.</summary>
         /// <param name="sender">The sender.</param>
@@ -89,10 +83,28 @@ namespace Models.CLEM.Activities
             // set up pre start conception status of breeders
             IEnumerable<Ruminant> herd = CurrentHerd(true);
 
+            // report sucklings birth and conception for startup mothers.
+            foreach (RuminantFemale female in herd.OfType<RuminantFemale>().Where(a => a.SucklingOffspringList.Any()))
+            {
+                // report conception status changed from those identified suckling at startup
+                DateTime dte = clock.StartDate.AddMonths(Convert.ToInt32(female.AgeAtLastConception - female.Age));
+                dte = new DateTime(dte.Year, dte.Month, DateTime.DaysInMonth(dte.Year, dte.Month));
+                conceptionArgs.Update(ConceptionStatus.Conceived, female, dte, calculateFromAge:false);
+                female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+                //dte = clock.StartDate.AddDays(-1).AddMonths(Convert.ToInt32(female.AgeAtLastBirth - female.Age));
+                //dte = new DateTime(dte.Year, dte.Month, DateTime.DaysInMonth(dte.Year, dte.Month));
+                conceptionArgs.Update(ConceptionStatus.Birth, female, dte, calculateFromAge: false);
+                female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+            }
+
             // report previous pregnancies as conceptions
             foreach (RuminantFemale female in herd.OfType<RuminantFemale>().Where(a => a.IsPregnant))
-                // report conception status changed from those assigned calf at startup
-                female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(Reporting.ConceptionStatus.Conceived, female, clock.Today));
+            {
+                // report conception status changed from those identified pregnant at startup
+                // ToDo: spread over gestation period. Currently all in one month... doesn't really matter
+                conceptionArgs.Update(ConceptionStatus.Conceived, female, clock.Today);
+                female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+            }
 
             // work out pregnancy status of initial herd
             if (InferStartupPregnancy)
@@ -124,13 +136,11 @@ namespace Models.CLEM.Activities
                                        group ind by ind.Location into grp
                                        select grp;
 
-                        int breedersCount = breeders.Count();
-
                         // must be breeders to bother checking any further
                         // must be either uncontrolled mating or the timing of controlled mating
-                        if (breedersCount > 0 & (!useControlledMating || this.TimingCheck(previousDate)))
+                        if (breeders.Count() > 0 & (!useControlledMating || controlledMating.TimingCheck(previousDate)))
                         {
-                            int numberPossible = breedersCount;
+                            int numberPossible = 0;
                             int numberServiced = 1;
                             double limiter = 1;
                             List<Ruminant> maleBreeders = new List<Ruminant>();
@@ -168,7 +178,7 @@ namespace Models.CLEM.Activities
                                             // calculate conception
                                             Reporting.ConceptionStatus status = Reporting.ConceptionStatus.NotMated;
                                             double conceptionRate = ConceptionRate(female, out status);
-                                            if (RandomNumberGenerator.Generator.NextDouble() <= conceptionRate)
+                                            if (MathUtilities.IsLessThanOrEqual(RandomNumberGenerator.Generator.NextDouble(), conceptionRate))
                                             {
                                                 female.UpdateConceptionDetails(female.CalulateNumberOfOffspringThisPregnancy(), conceptionRate, i);
                                                 female.LastMatingStyle = MatingStyle.PreSimulation;
@@ -179,26 +189,42 @@ namespace Models.CLEM.Activities
                                                     AddMalesAttributeDetails(female, maleBreeders[RandomNumberGenerator.Generator.Next(0, maleBreeders.Count() - 1)]);
 
                                                 // report conception status changed
-                                                female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(Reporting.ConceptionStatus.Conceived, female, conceiveDate));
+                                                conceptionArgs.Status = ConceptionStatus.Conceived;
+                                                conceptionArgs.Female = female;
 
-                                                // check for perenatal mortality
+                                                conceptionArgs.Update(ConceptionStatus.Conceived, female, conceiveDate, null, false);
+                                                female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+
+                                                // check for perinatal mortality
+                                                // Todo: match functionality of controlled below that was made to work with i and j to give month
                                                 for (int j = i; j < monthsAgoStop; j++)
                                                 {
                                                     DateTime lossDate = clock.Today.AddMonths(i);
                                                     lossDate = new DateTime(lossDate.Year, lossDate.Month, DateTime.DaysInMonth(lossDate.Year, lossDate.Month));
 
-                                                    for (int k = 0; k < female.CarryingCount; i++)
+                                                    for (int k = 0; k < female.CarryingCount; k++)
                                                     {
-                                                        if (RandomNumberGenerator.Generator.NextDouble() < (female.BreedParams.PrenatalMortality / (female.BreedParams.GestationLength + 1)))
+                                                        if (MathUtilities.IsLessThan(RandomNumberGenerator.Generator.NextDouble(), female.BreedParams.PrenatalMortality / (female.BreedParams.GestationLength + 1)))
                                                         {
                                                             female.OneOffspringDies();
                                                             if (female.NumberOfOffspring == 0)
+                                                            {
                                                                 // report conception status changed when last multiple birth dies.
-                                                                female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(Reporting.ConceptionStatus.Failed, female, lossDate));
+                                                                conceptionArgs.Update(ConceptionStatus.Failed, female, lossDate, null, false);
+                                                                female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+                                                            }
                                                         }
                                                     }
                                                 }
                                             }
+                                            //else
+                                            //{
+                                            //    // report conception status changed when last multiple birth dies.
+                                            //    // ToDo: not sure this is working.. Do we need an unsuccessful tag in history
+                                            //    conceptionArgs.Update(ConceptionStatus.Unsuccessful, female, conceiveDate, null, false);
+                                            //    female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+                                            //    //female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(Reporting.ConceptionStatus.Unsuccessful, female, conceiveDate));
+                                            //}
                                         }
                                     }
                                 }
@@ -208,14 +234,14 @@ namespace Models.CLEM.Activities
                                     numberPossible = Convert.ToInt32(limiter * location.OfType<RuminantFemale>().Count(), CultureInfo.InvariantCulture);
                                     foreach (RuminantFemale female in location.OfType<RuminantFemale>())
                                     {
-                                        if (!female.IsPregnant && (female.Age - female.AgeAtLastBirth) * 30.4 >= female.BreedParams.MinimumDaysBirthToConception)
+                                        if (!female.IsPregnant && MathUtilities.IsGreaterThanOrEqual((female.Age - female.AgeAtLastBirth) * 30.4, female.BreedParams.MinimumDaysBirthToConception))
                                         {
                                             // calculate conception
-                                            Reporting.ConceptionStatus status = Reporting.ConceptionStatus.NotMated;
+                                            ConceptionStatus status = ConceptionStatus.NotMated;
                                             double conceptionRate = ConceptionRate(female, out status);
                                             if (numberServiced <= numberPossible) // labour/finance limited number
                                             {
-                                                if (RandomNumberGenerator.Generator.NextDouble() <= conceptionRate)
+                                                if (MathUtilities.IsLessThanOrEqual(RandomNumberGenerator.Generator.NextDouble(), conceptionRate))
                                                 {
                                                     female.UpdateConceptionDetails(female.CalulateNumberOfOffspringThisPregnancy(), conceptionRate, i);
                                                     female.LastMatingStyle = MatingStyle.Controlled;
@@ -226,22 +252,26 @@ namespace Models.CLEM.Activities
                                                         AddMalesAttributeDetails(female, controlledMating.SireAttributes);
 
                                                     // report conception status changed
-                                                    female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(Reporting.ConceptionStatus.Conceived, female, conceiveDate));
+                                                    conceptionArgs.Update(ConceptionStatus.Conceived, female, conceiveDate, null, false);
+                                                    female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
 
                                                     // check for perenatal mortality
-                                                    for (int j = i; j < monthsAgoStop; j++)
+                                                    for (int j = i+1; j < monthsAgoStop; j++)
                                                     {
-                                                        DateTime lossDate = clock.Today.AddMonths(i);
+                                                        DateTime lossDate = conceiveDate.AddMonths(j-i);
                                                         lossDate = new DateTime(lossDate.Year, lossDate.Month, DateTime.DaysInMonth(lossDate.Year, lossDate.Month));
 
                                                         for (int k = 0; k < female.CarryingCount; k++)
                                                         {
-                                                            if (RandomNumberGenerator.Generator.NextDouble() < (female.BreedParams.PrenatalMortality / (female.BreedParams.GestationLength + 1)))
+                                                            if (MathUtilities.IsLessThan(RandomNumberGenerator.Generator.NextDouble(), female.BreedParams.PrenatalMortality / (female.BreedParams.GestationLength + 1)))
                                                             {
                                                                 female.OneOffspringDies();
                                                                 if (female.NumberOfOffspring == 0)
+                                                                {
                                                                     // report conception status changed when last multiple birth dies.
-                                                                    female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(Reporting.ConceptionStatus.Failed, female, lossDate));
+                                                                    conceptionArgs.Update(ConceptionStatus.Failed, female, lossDate, null, false);
+                                                                    female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -254,10 +284,21 @@ namespace Models.CLEM.Activities
                                 }
                             }
                         }
-                    } 
+                    }
                 }
             }
 
+        }
+
+        /// <summary>Function to determine naturally wean individuals at start of timestep</summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+        [EventSubscribe("CLEMStartOfTimeStep")]
+        private void OnCLEMStartOfTimeStep(object sender, EventArgs e)
+        {
+            // Reset all activity determined conception rates
+            if(useControlledMating)
+                _ = GetIndividuals<RuminantFemale>(GetRuminantHerdSelectionStyle.AllOnFarm).Where(a => a.IsBreeder).Select(a => a.ActivityDeterminedConceptionRate == null);
         }
 
         /// <summary>An event handler to perform herd breeding </summary>
@@ -273,63 +314,84 @@ namespace Models.CLEM.Activities
             List<RuminantFemale> pregnantherd = CurrentHerd(true).OfType<RuminantFemale>().Where(a => a.IsPregnant).ToList();
 
             // determine all fetus and newborn mortality of all pregnant females.
+            bool preglost = false;
+            bool birthoccurred = false;
             foreach (RuminantFemale female in pregnantherd)
             {
-                // calculate fetus and newborn mortality 
+
+                // calculate fetus and newborn mortality
                 // total mortality / (gestation months + 1) to get monthly mortality
                 // done here before births to account for post birth motality as well..
                 // IsPregnant status does not change until births occur in next section so will include mortality in month of birth
                 // needs to be calculated for each offspring carried.
+
                 for (int i = 0; i < female.CarryingCount; i++)
                 {
                     var rnd = RandomNumberGenerator.Generator.NextDouble();
-                    if (rnd < (female.BreedParams.PrenatalMortality / (female.BreedParams.GestationLength + 1)))
+                    if (MathUtilities.IsLessThan(rnd, female.BreedParams.PrenatalMortality / (female.BreedParams.GestationLength + 1)))
                     {
+                        preglost = true;
                         female.OneOffspringDies();
                         if (female.NumberOfOffspring == 0)
+                        {
                             // report conception status changed when last multiple birth dies.
-                            female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(Reporting.ConceptionStatus.Failed, female, clock.Today));
+                            conceptionArgs.Update(ConceptionStatus.Failed, female, clock.Today);
+                            female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+                        }
                     }
                 }
 
                 if (female.BirthDue)
                 {
+                    birthoccurred = true;
                     int numberOfNewborn = female.CarryingCount;
                     for (int i = 0; i < numberOfNewborn; i++)
                     {
                         bool isMale = RandomNumberGenerator.Generator.NextDouble() <= female.BreedParams.ProportionOffspringMale;
                         Sex sex = isMale ? Sex.Male : Sex.Female;
                         double weight = female.BreedParams.SRWBirth * female.StandardReferenceWeight * (1 - 0.33 * (1 - female.Weight / female.StandardReferenceWeight));
-                        
-                        Ruminant newCalfRuminant = Ruminant.Create(sex, female.BreedParams, 0, weight);
-                        newCalfRuminant.HerdName = female.HerdName;
-                        newCalfRuminant.Breed = female.BreedParams.Breed;
-                        newCalfRuminant.ID = HerdResource.NextUniqueID;
-                        newCalfRuminant.Location = female.Location;
-                        newCalfRuminant.Mother = female;
-                        newCalfRuminant.Number = 1;
-                        newCalfRuminant.SetUnweaned();
-                        // calf weight from Freer
-                        newCalfRuminant.PreviousWeight = newCalfRuminant.Weight;
-                        newCalfRuminant.SaleFlag = HerdChangeReason.Born;
+
+                        Ruminant newSucklingRuminant = Ruminant.Create(sex, female.BreedParams, 0, weight);
+                        newSucklingRuminant.HerdName = female.HerdName;
+                        newSucklingRuminant.Breed = female.BreedParams.Breed;
+                        newSucklingRuminant.ID = HerdResource.NextUniqueID;
+                        newSucklingRuminant.Location = female.Location;
+                        newSucklingRuminant.Mother = female;
+                        newSucklingRuminant.Number = 1;
+                        // suckling/calf weight from Freer
+                        newSucklingRuminant.PreviousWeight = newSucklingRuminant.Weight;
+                        newSucklingRuminant.SaleFlag = HerdChangeReason.Born;
 
                         // add attributes inherited from mother
-                        foreach (var attribute in female.Attributes.Items)
-                            if (attribute.Value != null)
-                                newCalfRuminant.Attributes.Add(attribute.Key, attribute.Value.GetInheritedAttribute() as IIndividualAttribute);
+                        foreach (var attribute in female.Attributes.Items.Where(a => a.Value is not null))
+                            newSucklingRuminant.AddInheritedAttribute(attribute); // .Attributes.Add(attribute.Key, attribute.Value.GetInheritedAttribute() as IIndividualAttribute);
 
-                        HerdResource.AddRuminant(newCalfRuminant, this);
+                        HerdResource.AddRuminant(newSucklingRuminant, this);
 
                         // add to sucklings
-                        female.SucklingOffspringList.Add(newCalfRuminant);
+                        female.SucklingOffspringList.Add(newSucklingRuminant);
                         // this now reports for each individual born not a birth event as individual wean events are reported
-                        female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(Reporting.ConceptionStatus.Birth, female, clock.Today));
+
+                        conceptionArgs.Update(ConceptionStatus.Birth, female, clock.Today);
+                        female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+                        //female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(Reporting.ConceptionStatus.Birth, female, clock.Today));
                     }
                     female.UpdateBirthDetails();
-                    this.Status = ActivityStatus.Success;
                 }
-
             }
+
+            if (preglost)
+            {
+                AddStatusMessage("Lost pregnancy");
+                this.Status = ActivityStatus.Success;
+            }
+            if (birthoccurred)
+            {
+                AddStatusMessage("Births occurred");
+                this.Status = ActivityStatus.Success;
+            }
+
+            var filters = GetCompanionModelsByIdentifier<RuminantGroup>(false, true, "SelectBreedersAvailable");
 
             // Perform breeding
             IEnumerable<Ruminant> herd = null;
@@ -348,12 +410,20 @@ namespace Models.CLEM.Activities
                                group ind by ind.Location into grp
                                select grp;
 
-                int breedersCount = breeders.Count();
-                int numberPossible = breedersCount;
+                // identify not ready for reporting and tracking
+                var notReadyBreeders = herd.Where(a => a.Sex == Sex.Female).Cast<RuminantFemale>().Where(a => a.IsBreeder && !a.IsAbleToBreed && !a.IsPregnant);
+                foreach (RuminantFemale female in notReadyBreeders)
+                {
+                    conceptionArgs.Update(ConceptionStatus.NotReady, female, clock.Today);
+                    female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+                }
+
+                int numberPossible = breeders.Sum(a => a.Count());
                 int numberServiced = 1;
                 List<Ruminant> maleBreeders = new List<Ruminant>();
 
                 // for each location where parts of this herd are located
+                bool breedoccurred = false;
                 foreach (var location in breeders)
                 {
                     numberPossible = -1;
@@ -366,7 +436,7 @@ namespace Models.CLEM.Activities
                         if (location.GroupBy(a => a.Sex).Count() == 2)
                         {
                             int maleCount = location.OfType<RuminantMale>().Count();
-                            // get a list of males to provide attributes when incontrolled mating.
+                            // get a list of males to provide attributes when in controlled mating.
                             if(maleCount > 0 && location.FirstOrDefault().BreedParams.IncludedAttributeInheritanceWhenMating)
                                 maleBreeders = location.Where(a => a.Sex == Sex.Male).ToList();
 
@@ -377,68 +447,95 @@ namespace Models.CLEM.Activities
 
                     numberServiced = 0;
                     lastJoinIndex = -1;
-                    foreach (RuminantFemale female in location.OfType<RuminantFemale>().Where(a => !a.IsPregnant))
+                    int cnt = 0;
+                    // shuffle the not pregnant females when obtained to avoid any inherant order by creation of individuals affecting which individuals are available first
+                    var notPregnantFemales = location.OfType<RuminantFemale>().Where(a => !a.IsPregnant).OrderBy(a => RandomNumberGenerator.Generator.Next()).ToList();
+                    int totalToBreed = notPregnantFemales.Count;
+                    while(cnt < totalToBreed)
                     {
-                        Reporting.ConceptionStatus status = Reporting.ConceptionStatus.NotMated;
+                        RuminantFemale female = notPregnantFemales.ElementAt(cnt);
+                        ConceptionStatus status = ConceptionStatus.NotMated;
                         if (numberServiced < numberPossible)
                         {
-                            // calculate conception
-                            double conceptionRate = ConceptionRate(female, out status);
-                            if (conceptionRate > 0)
+                            double conceptionRate = 0;
+
+                            if (female.ActivityDeterminedConceptionRate != null)
+                                // If an activity controlled mating has previously determined conception rate and saved it (it will not be null if mated)
+                                // This conception rate can be used instead of determining conception here.
+                                conceptionRate = female.ActivityDeterminedConceptionRate ?? 0;
+                            else
+                                // calculate conception
+                                conceptionRate = ConceptionRate(female, out status);
+
+                            // if mandatory attributes are present in the herd, save male value with female details.
+                            // update male for both successful and failed matings (next if statement
+                            if (female.BreedParams.IncludedAttributeInheritanceWhenMating)
                             {
-                                if (RandomNumberGenerator.Generator.NextDouble() <= conceptionRate)
+                                object male = null;
+                                if (useControlledMating)
+                                {
+                                    bool newJoining = needsNewJoiningMale(controlledMating.JoiningsPerMale, numberServiced);
+                                    // save all male attributes
+                                    AddMalesAttributeDetails(female, controlledMating.SireAttributes, newJoining);
+                                }
+                                else
+                                {
+                                    male = maleBreeders[RandomNumberGenerator.Generator.Next(0, maleBreeders.Count() - 1)];
+                                    female.LastMatingStyle = ((male as RuminantMale).IsWildBreeder ? MatingStyle.WildBreeder : MatingStyle.Natural);
+
+                                    // randomly select male
+                                    AddMalesAttributeDetails(female, male as Ruminant);
+                                }
+                            }
+
+                            // conception rate will be -ve for unsuccessful matings from controlled mating. a value of 0 still represents not mated
+                            if (Math.Abs(conceptionRate) > 0)
+                            {
+                                // if controlled mating (ActiDetConcepRate not null and rate > 0 then successful mating), otherwise compare with random and conception rate for natural mating.
+                                //ActivitydeterminedConception rate > 0, otherwise rate calculated above versus the random number approach
+                                if ((female.ActivityDeterminedConceptionRate != null)?conceptionRate > 0:RandomNumberGenerator.Generator.NextDouble() <= conceptionRate)
                                 {
                                     female.UpdateConceptionDetails(female.CalulateNumberOfOffspringThisPregnancy(), conceptionRate, 0);
-
-                                    object male = null;
+                                    conceptionArgs.Update(ConceptionStatus.Conceived, female, clock.Today);
+                                    female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
 
                                     if (useControlledMating)
                                         female.LastMatingStyle = MatingStyle.Controlled;
 
-                                    // if mandatory attributes are present in the herd, save male value with female details.
-                                    if(female.BreedParams.IncludedAttributeInheritanceWhenMating)
-                                    {
-                                        if (useControlledMating)
-                                        {
-                                            bool newJoining = needsNewJoiningMale(controlledMating.JoiningsPerMale, numberServiced);
-                                            if (!controlledMating.SireAttributes.Any() & (newJoining | !randomHerdAttributes.Any()))
-                                            {
-                                                // select random attributes from breeders
-                                                randomHerdAttributes = location.ElementAt(RandomNumberGenerator.Generator.Next(location.Count())).Attributes.Items;
-                                            }
-
-                                            // save all male attributes
-                                            AddMalesAttributeDetails(female, controlledMating.SireAttributes, newJoining);
-                                        }
-                                        else
-                                        {
-                                            male = maleBreeders[RandomNumberGenerator.Generator.Next(0, maleBreeders.Count() - 1)];
-                                            female.LastMatingStyle = ((male as RuminantMale).IsWildBreeder ? MatingStyle.WildBreeder : MatingStyle.Natural);
-
-                                            // randomly select male
-                                            AddMalesAttributeDetails(female, male as Ruminant);
-                                        }
-                                    }
-                                    status = Reporting.ConceptionStatus.Conceived;
+                                    status = ConceptionStatus.Conceived;
                                     NumberConceived++;
+                                }
+                                else
+                                {
+                                    status = ConceptionStatus.Unsuccessful;
                                 }
                             }
                             numberServiced++;
-                            this.Status = ActivityStatus.Success;
+                            breedoccurred = true;
                         }
 
                         // report change in breeding status
                         // do not report for -1 (controlled mating outside timing)
-                        if (numberPossible >= 0 && status != Reporting.ConceptionStatus.NotAvailable)
-                            female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(status, female, clock.Today));
+                        if (numberPossible >= 0 && status != ConceptionStatus.Conceived && status != ConceptionStatus.NotMated)
+                        {
+                            conceptionArgs.Update(status, female, clock.Today, null, false);
+                            female.BreedParams.OnConceptionStatusChanged(conceptionArgs);
+                            //female.BreedParams.OnConceptionStatusChanged(new Reporting.ConceptionStatusChangedEventArgs(status, female, clock.Today));
+                        }
+                        cnt++;
                     }
 
                     // report a natural mating locations for transparency via a message
                     if (numberServiced > 0 & !useControlledMating)
                     {
                         string warning = $"Natural (uncontrolled) mating ocurred in [r={(location.Key ?? "Not specified - general yards")}]";
-                        Warnings.CheckAndWrite(warning, Summary, this, MessageType.Warning);
+                        Warnings.CheckAndWrite(warning, Summary, this, MessageType.Information);
                     }
+                }
+                if(breedoccurred)
+                {
+                    this.Status = ActivityStatus.Success;
+                    AddStatusMessage("Breeding occurred");
                 }
             }
             // report that this activity was performed as it does not use base GetResourcesRequired
@@ -459,49 +556,17 @@ namespace Models.CLEM.Activities
         }
 
         /// <summary>
-        /// A method to add the available male attributes to the female store at mating using attributes supplied by controlled mating 
+        /// A method to add the available male attributes to the female store at mating using attributes supplied by controlled mating
         /// </summary>
         /// <param name="female">The female breeder successfully mated</param>
         /// <param name="maleAttributes">a list of available male attributes setters</param>
         /// <param name="newMale">Create new instance (T) or use last created (F)</param>
-        private void AddMalesAttributeDetails(RuminantFemale female, List<SetAttributeWithValue> maleAttributes, bool newMale = true)
+        private void AddMalesAttributeDetails(RuminantFemale female, List<ISetAttribute> maleAttributes, bool newMale = true)
         {
             foreach (var attribute in female.Attributes.Items)
             {
-                var maleAttribute = maleAttributes.Where(a => a.AttributeName == attribute.Key).FirstOrDefault();
-                if(maleAttribute != null)
-                {
-                    var calculatedAttribute = maleAttribute.GetAttribute(newMale);
-                    if(attribute.Value != null && attribute.Value.InheritanceStyle != calculatedAttribute.InheritanceStyle)
-                        throw new ApsimXException(this, $"The inheritance style for attribute [{attribute.Key}] differs between the breeder and attributes supplied by controlled mating in [a={this.Name}]");
-
-                    if (attribute.Value != null)
-                        attribute.Value.StoredMateValue = calculatedAttribute.StoredValue;
-                }
-                else
-                {
-                    // if there are random herd attributes available
-                    if (randomHerdAttributes.Any())
-                    {
-                        if (!randomHerdAttributes.TryGetValue(attribute.Key, out IIndividualAttribute randomAttribute))
-                            throw new ApsimXException(this, $"Unable to assign mandatory attribute from random herd selection for [a={this.Name}] and madatory attribute [{attribute.Key}]");
-                        else
-                        {
-                            if (attribute.Value != null && attribute.Value.InheritanceStyle != randomAttribute.InheritanceStyle)
-                                throw new ApsimXException(this, $"The inheritance style for attribute [{attribute.Key}] differs between the breeder and attributes supplied by random herd selection in [a={this.Name}]");
-
-                            if (attribute.Value != null)
-                                attribute.Value.StoredMateValue = randomAttribute.StoredValue;
-                        }
-                    }
-                    else
-                    {
-                        if (attribute.Value != null)
-                            attribute.Value.StoredMateValue = null;
-                        if (female.BreedParams.IsMandatoryAttribute(attribute.Key))
-                            throw new ApsimXException(this, $"The sire attributes provided for [a={this.Name}] do not include the madatory attribute [{attribute.Key}]");
-                    }
-                }
+                var maleAttribute = maleAttributes.FirstOrDefault(a => a.AttributeName == attribute.Key);
+                SetFemaleMateAttributes(female, attribute, maleAttribute?.GetAttribute(newMale));
             }
         }
 
@@ -512,27 +577,45 @@ namespace Models.CLEM.Activities
         /// <param name="male">The mated male</param>
         private void AddMalesAttributeDetails(RuminantFemale female, Ruminant male)
         {
-            if (male != null)
-            {
-                foreach (var attribute in female.Attributes.Items)
-                {
-                    var maleAttribute = male.Attributes.GetValue(attribute.Key);
-                    if (maleAttribute != null)
-                    {
-                        if (attribute.Value != null && attribute.Value.InheritanceStyle != maleAttribute.InheritanceStyle)
-                            throw new ApsimXException(this, $"The inheritance style for attribute [{attribute.Key}] differs between the breeder and breeding male from the herd in [a={this.Name}]");
+            if (male is null) return;
 
-                        if (attribute.Value != null)
-                            attribute.Value.StoredMateValue = maleAttribute.StoredValue;
-                    }
+            foreach (var attribute in female.Attributes.Items)
+            {
+                var maleAttribute = male.Attributes.GetValue(attribute.Key);
+                SetFemaleMateAttributes(female, attribute, maleAttribute);
+            }
+        }
+
+        private void SetFemaleMateAttributes(RuminantFemale female, KeyValuePair<string, IIndividualAttribute> femaleAttribute, IIndividualAttribute maleAttribute)
+        {
+            if (maleAttribute != null)
+            {
+                if (femaleAttribute.Value != null && femaleAttribute.Value.InheritanceStyle != maleAttribute.InheritanceStyle)
+                {
+                    string errorMsg;
+                    if (useControlledMating)
+                        errorMsg = $"provided from [a={controlledMating.NameWithParent}]";
                     else
-                    {
-                        if (attribute.Value != null)
-                            attribute.Value.StoredMateValue = null;
-                        if (female.BreedParams.IsMandatoryAttribute(attribute.Key))
-                            throw new ApsimXException(this, $"The attributes provided with the breeding male from the herd does not include the madatory attribute [{attribute.Key}] in [a={this.Name}]");
-                    }
-                } 
+                        errorMsg = $"from the herd in [a={NameWithParent}]";
+                    throw new ApsimXException(this, $"The inheritance style for attribute [{femaleAttribute.Key}] differs between the breeder [{femaleAttribute.Value.InheritanceStyle}] and breeding male [{maleAttribute.InheritanceStyle}] {errorMsg}");
+                }
+
+                if (femaleAttribute.Value != null)
+                    femaleAttribute.Value.StoredMateValue = maleAttribute.StoredValue;
+            }
+            else
+            {
+                if (femaleAttribute.Value != null)
+                    femaleAttribute.Value.StoredMateValue = null;
+                if (female.BreedParams.IsMandatoryAttribute(femaleAttribute.Key))
+                {
+                    string errorMsg;
+                    if (useControlledMating)
+                        errorMsg = $"Cannot locate the madatory attribute [{femaleAttribute.Key}] in [a={controlledMating.NameWithParent}]{Environment.NewLine}Add a [SetAttribute] component below the [a=RuminantnActivityControlledMating]";
+                    else
+                        errorMsg = $"Cannot locate the madatory attribute [{femaleAttribute.Key}] in from the breeding male selected from the herd in [a={NameWithParent}]{Environment.NewLine}Ensure all sires in initial herd or purchased provide the appropriate [SetAttribute] component";
+                    throw new ApsimXException(this, errorMsg);
+                }
             }
         }
 
@@ -549,19 +632,19 @@ namespace Models.CLEM.Activities
             if (!female.IsPregnant)
             {
                 status = Reporting.ConceptionStatus.NotReady;
-                if (female.Age >= female.BreedParams.MinimumAge1stMating && female.NumberOfBirths == 0)
+                if (MathUtilities.IsGreaterThanOrEqual(female.Age, female.BreedParams.MinimumAge1stMating) && female.NumberOfBirths == 0)
                     isConceptionReady = true;
                 else
                 {
                     // add one to age to ensure that conception is due this timestep
-                    if ((female.Age + 1 - female.AgeAtLastBirth) * 30.4 > female.BreedParams.MinimumDaysBirthToConception)
+                    if (MathUtilities.IsGreaterThan((female.Age + 1 - female.AgeAtLastBirth) * 30.4, female.BreedParams.MinimumDaysBirthToConception))
                     {
                         // only based upon period since birth
                         isConceptionReady = true;
 
                         // DEVELOPMENT NOTE:
                         // The following IPI calculation and check present in NABSA has been removed for testing
-                        // It is assumed that the individual based model with weight influences will handle the old IPI calculation 
+                        // It is assumed that the individual based model with weight influences will handle the old IPI calculation
                         // These parameters can now be removed form the RuminantType list
                         //double currentIPI = female.BreedParams.InterParturitionIntervalIntercept * Math.Pow(female.ProportionOfNormalisedWeight, female.BreedParams.InterParturitionIntervalCoefficient) * 30.4;
                         //double ageNextConception = female.AgeAtLastConception + (currentIPI / 30.4);
@@ -620,9 +703,9 @@ namespace Models.CLEM.Activities
                     htmlWriter.Write("This simulation uses natural (uncontrolled) mating that will occur when males and females of breeding condition are located together");
                     htmlWriter.Write("</div>");
                 }
-                return htmlWriter.ToString(); 
+                return htmlWriter.ToString();
             }
-        } 
+        }
         #endregion
     }
 }

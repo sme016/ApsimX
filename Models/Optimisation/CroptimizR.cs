@@ -1,13 +1,4 @@
-﻿using APSIM.Shared.JobRunning;
-using APSIM.Shared.Utilities;
-using Models.Core;
-using Models.Core.Run;
-using Models.Factorial;
-using Models.Interfaces;
-using Models.Storage;
-using Models.Utilities;
-using Newtonsoft.Json;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
@@ -17,8 +8,19 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using Models.Sensitivity;
+using System.Threading.Tasks;
+using APSIM.Shared.Containers;
+using APSIM.Shared.Interfaces;
+using APSIM.Shared.JobRunning;
+using APSIM.Shared.Utilities;
+using Models.Core;
 using Models.Core.ApsimFile;
+using Models.Core.Run;
+using Models.Sensitivity;
+using Models.Storage;
+using Models.Utilities;
+using Newtonsoft.Json;
+using static Models.Core.Overrides;
 
 namespace Models.Optimisation
 {
@@ -50,10 +52,16 @@ namespace Models.Optimisation
     /// </remarks>
     [Serializable]
     [ViewName("UserInterface.Views.PropertyAndGridView")]
-    [PresenterName("UserInterface.Presenters.PropertyAndTablePresenter")]
+    [PresenterName("UserInterface.Presenters.PropertyAndGridPresenter")]
     [ValidParent(ParentType = typeof(Simulations))]
-    public class CroptimizR : Model, IModelAsTable, IRunnable, IReportsStatus
+    public class CroptimizR : Model, IRunnable, IReportsStatus
     {
+        /// <summary>
+        /// File name of the generated csv file containing croptimizR
+        /// outputs.
+        /// </summary>
+        private const string outputCsvFileName = "optim_results.csv";
+
         /// <summary>
         /// This ID is used to identify temp files used by this tool.
         /// </summary>
@@ -70,6 +78,7 @@ namespace Models.Optimisation
         /// <remarks>
         /// Needs to be public so that it gets written to .apsimx file
         /// </remarks>
+        [Display]
         public List<Parameter> Parameters { get; set; } = new List<Parameter>();
 
         /// <summary>
@@ -100,7 +109,7 @@ namespace Models.Optimisation
         /// Random seed to be used. Set to null for random results.
         /// </summary>
         [Description("Random seed (optional)")]
-        [Tooltip("Optional random seed. Iff set, results will be the same for each execution. Leave empty for randomised results.")]
+        [Tooltip("Optional random seed. If set, results will be the same for each execution. Leave empty for randomised results.")]
         public int? RandomSeed { get; set; }
 
         /// <summary>
@@ -154,66 +163,21 @@ namespace Models.Optimisation
         public string Status { get; private set; }
 
         /// <summary>
-        /// Gets or sets the table of values.
-        /// </summary>
-        [JsonIgnore]
-        public List<DataTable> Tables
-        {
-            get
-            {
-                List<DataTable> tables = new List<DataTable>();
-
-                // Add a parameter table
-                DataTable table = new DataTable();
-                table.Columns.Add("Name", typeof(string));
-                table.Columns.Add("Path", typeof(string));
-                table.Columns.Add("LowerBound", typeof(double));
-                table.Columns.Add("UpperBound", typeof(double));
-
-                foreach (Parameter param in Parameters)
-                {
-                    DataRow row = table.NewRow();
-                    row["Name"] = param.Name;
-                    row["Path"] = param.Path;
-                    row["LowerBound"] = param.LowerBound;
-                    row["UpperBound"] = param.UpperBound;
-                    table.Rows.Add(row);
-                }
-                tables.Add(table);
-
-                return tables;
-            }
-            set
-            {
-                Parameters.Clear();
-                foreach (DataRow row in value[0].Rows)
-                {
-                    Parameter param = new Parameter();
-                    if (!Convert.IsDBNull(row["Name"]))
-                        param.Name = row["Name"].ToString();
-                    if (!Convert.IsDBNull(row["Path"]))
-                        param.Path = row["Path"].ToString();
-                    if (!Convert.IsDBNull(row["LowerBound"]))
-                        param.LowerBound = Convert.ToDouble(row["LowerBound"], CultureInfo.InvariantCulture);
-                    if (!Convert.IsDBNull(row["UpperBound"]))
-                        param.UpperBound = Convert.ToDouble(row["UpperBound"], CultureInfo.InvariantCulture);
-                    if (param.Name != null || param.Path != null)
-                        Parameters.Add(param);
-                }
-            }
-        }
-
-        /// <summary>
         /// Invoked whenever the R process writes to stdout.
         /// </summary>
         /// <param name="sender">Sender object.</param>
         /// <param name="e">Event arguments.</param>
         private void OnOutputReceivedFromR(object sender, DataReceivedEventArgs e)
         {
-            if (e.Data.Contains("Working:"))
+            OnOutputReceived(e.Data);
+        }
+
+        private void OnOutputReceived(string output)
+        {
+            if (output.Contains("Working:"))
             {
                 // Update progress.
-                Match match = Regex.Match(e.Data, @"Working: ([^%]+)%");
+                Match match = Regex.Match(output, @"Working: ([^%]+)%");
                 string progressString = match.Groups[1].Value;
                 if (double.TryParse(progressString, NumberStyles.Float, CultureInfo.CurrentCulture, out double progress))
                     Progress = progress / 100; // The R script reports progress as percent
@@ -233,29 +197,54 @@ namespace Models.Optimisation
 
             contents.AppendLine($"variable_names <- c({string.Join(", ", VariableNames.Select(x => $"'{x.Trim()}'").ToArray())})");
 
+            // In theory, it would be better to always use relative path to
+            // the input file, by setting the working directory of the R
+            // process appropriately. Unfortunately, this will require some
+            // refactoring of the R wrapper which I don't really want to do
+            // right now. So for now I'm going to just use relative path if
+            // using docker.
+            if (RDocker.UseDocker())
+                apsimxFileName = Path.GetFileName(apsimxFileName);
+
             // If we're reading from the PredictedObserved table, need to fix
             // Predicted./Observed. suffix for the observed variables.
+            string escapedOutputPath = outputPath.Replace(@"\", "/");
             string[] sanitisedObservedVariables = GetObservedVariableName().Select(x => $"'{x.Trim()}'").ToArray();
             string dateVariable = VariableNames.Any(v => v.StartsWith("Predicted.")) ? "Predicted.Clock.Today" : "Clock.Today";
             contents.AppendLine($"observed_variable_names <- c({string.Join(", ", sanitisedObservedVariables)}, '{dateVariable}')");
-            contents.AppendLine($"apsimx_path <- '{typeof(IModel).Assembly.Location.Replace(@"\", @"\\")}'");
-            contents.AppendLine($"apsimx_file <- '{apsimxFileName.Replace(@"\", @"\\")}'");
+            contents.AppendLine($"apsimx_path <- '{PathToModels().Replace(@"\", "/")}'");
+            contents.AppendLine($"apsimx_file <- '{apsimxFileName.Replace(@"\", "/")}'");
             contents.AppendLine($"simulation_names <- {GetSimulationNames()}");
             contents.AppendLine($"predicted_table_name <- '{PredictedTableName}'");
             contents.AppendLine($"observed_table_name <- '{ObservedTableName}'");
             contents.AppendLine($"param_info <- {GetParamInfo()}");
             contents.AppendLine();
             contents.AppendLine(OptimizationMethod.GenerateOptimizationOptions("optim_options"));
-            contents.AppendLine($"optim_options$path_results <- '{outputPath.Replace(@"\", @"\\")}'");
+            contents.AppendLine($"optim_options$path_results <- '{escapedOutputPath}'");
             if (RandomSeed != null)
                 contents.AppendLine($"optim_options$ranseed <- {RandomSeed}");
             contents.AppendLine();
             contents.AppendLine($"crit_function <- {OptimizationMethod.CritFunction}");
             contents.AppendLine($"optim_method <- '{OptimizationMethod.ROptimizerName}'");
             contents.AppendLine();
-            contents.Append(ReflectionUtilities.GetResourceAsString("Models.Resources.RScripts.OptimizR.r"));
+            contents.AppendLine(ReflectionUtilities.GetResourceAsString("Models.Resources.RScripts.OptimizR.r"));
+
+            // Don't use Path.Combine() - as this may be running in a (linux) docker container.
+            // R will work with forward slashes for path separators on win and linux,
+            // but backslashes will not work on linux.
+            string rDataExpectedPath = $"{escapedOutputPath}/optim_results.Rdata";
+            contents.AppendLine(CreateReadRDataScript(rDataExpectedPath));
 
             File.WriteAllText(fileName, contents.ToString());
+        }
+
+        private string PathToModels()
+        {
+            if (RDocker.UseDocker())
+                // This is the expected path to the models executable in the docker
+                // image. Nasty stuff.
+                return "/opt/apsim/Models";
+            return typeof(IModel).Assembly.Location;
         }
 
         private string[] GetObservedVariableName()
@@ -273,14 +262,14 @@ namespace Models.Optimisation
         private string GenerateApsimXFile()
         {
             Simulations rootNode = FindAncestor<Simulations>();
-            string apsimxFileName = GetTempFileName($"apsimx_file_{id}", ".apsimx");
+            string apsimxFileName = GetTempFileName("input_file.apsimx");
 
             Simulations sims = new Simulations();
             sims.Children.AddRange(Children.Select(c => Apsim.Clone(c)));
             sims.Children.RemoveAll(c => c is IDataStore);
 
-            IModel replacements = this.FindInScope<Replacements>();
-            if (replacements != null && !sims.Children.Any(c => c is Replacements))
+            IModel replacements = Folder.FindReplacementsFolder(this);
+            if (replacements != null && !sims.Children.Any(c => Folder.IsModelReplacementsFolder(c)))
                 sims.Children.Add(Apsim.Clone(replacements));
 
             // Search for IDataStore, not DataStore - to allow for StorageViaSockets.
@@ -299,7 +288,7 @@ namespace Models.Optimisation
                 originalFile = storage?.FileName;
 
             // Copy files across.
-            foreach (IReferenceExternalFiles fileReference in (rootNode ?? sims).FindAllDescendants<IReferenceExternalFiles>().Cast<IReferenceExternalFiles>())
+            foreach (IReferenceExternalFiles fileReference in (rootNode ?? sims).FindAllDescendants<IReferenceExternalFiles>())
             {
                 foreach (string file in fileReference.GetReferencedFileNames())
                 {
@@ -378,12 +367,19 @@ namespace Models.Optimisation
         /// <summary>
         /// Returns a unique temporary filename.
         /// </summary>
-        /// <param name="name">Base name of the file. The returned filename will contain this name.</param>
-        /// <param name="extension">File extension to be used.</param>
+        /// <param name="name">Base name of the file, with file extension included.</param>
         /// <returns>Unique temporary filename.</returns>
-        private string GetTempFileName(string name, string extension)
+        private string GetTempFileName(string name)
         {
-            return Path.ChangeExtension(Path.Combine(Path.GetTempPath(), name + id), extension);
+            return Path.Combine(GetWorkingDirectory(), name);
+        }
+
+        /// <summary>
+        /// Get the working directory, into which all files used by croptimizr should be saved.
+        /// </summary>
+        private string GetWorkingDirectory()
+        {
+            return Path.Combine(Path.GetTempPath(), $"{Name}-{id}");
         }
 
         /// <summary>
@@ -402,29 +398,61 @@ namespace Models.Optimisation
         {
             Progress = 0;
 
-            Status = "Installing R Packages";
-
-            R r = new R(cancelToken.Token);
-            r.InstallPackages("remotes", "dplyr", "nloptr", "DiceDesign", "DBI", "cli");
-            r.InstallFromGithub("hol430/ApsimOnR", "SticsRPacks/CroptimizR");
-
             Status = "Generating R Script";
-            string fileName = GetTempFileName($"parameter_estimation_{id}", ".r");
+            string fileName = GetTempFileName("parameter_estimation.r");
 
-            string outputPath = Path.Combine(Path.GetTempPath(), $"croptimizr-output-{id}");
+            string outputPath = GetWorkingDirectory();
             if (!Directory.Exists(outputPath))
                 Directory.CreateDirectory(outputPath);
 
             string apsimxFileName = GenerateApsimXFile();
-            GenerateRScript(fileName, outputPath, apsimxFileName);
 
-            // todo - capture stderr as well?
-            r.OutputReceived += OnOutputReceivedFromR;
+            // If running with docker, all references to the output path must
+            // be relative (ie '.'). It would be nice to be able to do this with
+            // native R runner as well but that will require some refactoring work.
+            string outputReferencePath = RDocker.UseDocker() ? "." : outputPath;
 
-            Status = "Running Parameter Optimization";
-            string stdout = r.Run(fileName);
-            r.OutputReceived -= OnOutputReceivedFromR;
-            WriteMessage(stdout);
+            GenerateRScript(fileName, outputReferencePath, apsimxFileName);
+
+            if (RDocker.UseDocker())
+            {
+                // todo: we should really be reporting warnings/errors here.
+                // However any summary file will not have its links connected,
+                // due to the way that CroptimizR is run. This needs further thought.
+                IR client = new RDocker(
+                    outputHandler: OnOutputReceived
+                // warningHandler: w => FindInScope<ISummary>()?.WriteMessage(this, w, MessageType.Warning),
+                // errorHandler: e => FindInScope<ISummary>()?.WriteMessage(this, e, MessageType.Error)
+                );
+
+                Status = "Running Parameter Optimization";
+                try
+                {
+                    client.RunScriptAsync(fileName, new List<string>(), cancelToken.Token).Wait();
+                }
+                catch (AggregateException errors)
+                {
+                    // Don't propagate task canceled exceptions.
+                    if (errors.InnerExceptions.Count == 1 && errors.InnerExceptions[0] is TaskCanceledException)
+                        return;
+                    throw;
+                }
+            }
+            else
+            {
+                Status = "Installing R Packages";
+                R r = new R(cancelToken.Token);
+                r.InstallPackages("remotes", "dplyr", "nloptr", "DiceDesign", "DBI", "cli");
+                r.InstallFromGithub("hol430/ApsimOnR", "SticsRPacks/CroptimizR");
+
+                Status = "Running Parameter Optimization";
+
+                // todo - capture stderr as well?
+                r.OutputReceived += OnOutputReceivedFromR;
+                string stdout = r.Run(fileName);
+                r.OutputReceived -= OnOutputReceivedFromR;
+                WriteMessage(stdout);
+            }
 
             // Copy output files into appropriate output directory, if one is specified. Otherwise, delete them.
             Status = "Reading Output";
@@ -439,28 +467,27 @@ namespace Models.Optimisation
             bool firstFile = true;
             foreach (string file in Directory.EnumerateFiles(outputPath))
             {
-                if (Path.GetExtension(file) == ".Rdata")
+                if (Path.GetFileName(file) == outputCsvFileName)
                 {
                     if (storage != null && storage.Writer != null)
                     {
                         output = ReadRData(file);
 
-                        storage.Writer.WriteTable(output, deleteAllData:firstFile);
+                        storage.Writer.WriteTable(output, deleteAllData: firstFile);
                         firstFile = false;
                     }
                 }
                 if (!string.IsNullOrEmpty(apsimxFileDir))
                     File.Copy(file, Path.Combine(apsimxFileDir, Path.Combine($"{Name}-{Path.GetFileName(file)}")), true);
             }
-            Directory.Delete(outputPath, true);
 
             // Now, we run the simulations with the optimal values, and store
             // the results in a checkpoint called 'After'. Checkpointing has
             // not been implemented on the sockets storage implementation.
-            if (FindInScope<IDataStore>().Writer is DataStoreWriter)
+            if (output != null && FindInScope<IDataStore>().Writer is DataStoreWriter)
             {
                 Status = "Running simulations with optimised parameters";
-                IEnumerable<CompositeFactor> optimalValues = GetOptimalValues(output);
+                var optimalValues = GetOptimalValues(output);
                 RunSimsWithOptimalValues(apsimxFileName, "Optimal", optimalValues);
 
                 // Now run sims without optimal values, to populate the 'Current' checkpoint.
@@ -470,6 +497,17 @@ namespace Models.Optimisation
                 if (errors != null && errors.Count > 0)
                     throw errors[0];
             }
+
+            // Delete temp outputs.
+            Directory.Delete(outputPath, true);
+        }
+
+        /// <summary>
+        /// Cleanup the job after running it.
+        /// </summary>
+        public void Cleanup(System.Threading.CancellationTokenSource cancelToken)
+        {
+            // Do nothing.
         }
 
         /// <summary>
@@ -479,16 +517,16 @@ namespace Models.Optimisation
         /// <param name="checkpointName">Name of the checkpoint.</param>
         /// <param name="optimalValues">Changes to be applied to the models.</param>
         /// <param name="fileName">Name of the apsimx file run by the optimiser.</param>
-        private void RunSimsWithOptimalValues(string fileName, string checkpointName, IEnumerable<CompositeFactor> optimalValues)
+        private void RunSimsWithOptimalValues(string fileName, string checkpointName, IEnumerable<Override> optimalValues)
         {
             IDataStore storage = FindInScope<IDataStore>();
 
             // First, clone the simulations (we don't want to change the values
             // of the parameters in the original file).
-            Simulations clonedSims = FileFormat.ReadFromFile<Simulations>(fileName, e => throw e, false);
-            
+            Simulations clonedSims = FileFormat.ReadFromFile<Simulations>(fileName, e => throw e, false).NewModel as Simulations;
+
             // Apply the optimal values to the cloned simulations.
-            clonedSims = EditFile.ApplyChanges(clonedSims, optimalValues);
+            Overrides.Apply(clonedSims, optimalValues);
 
             DataStore clonedStorage = clonedSims.FindChild<DataStore>();
             clonedStorage.Close();
@@ -510,11 +548,11 @@ namespace Models.Optimisation
         /// parameter values returned by the optimiser.
         /// </summary>
         /// <param name="data">Datatable.</param>
-        private IEnumerable<CompositeFactor> GetOptimalValues(DataTable data)
+        private IEnumerable<Override> GetOptimalValues(DataTable data)
         {
             DataRow optimal = data.AsEnumerable().FirstOrDefault(r => r["Is Optimal"]?.ToString() == "TRUE");
             foreach (Parameter param in Parameters)
-                yield return new CompositeFactor("factor", param.Path, optimal[$"{param.Name} Final"]);
+                yield return new Override(param.Path, optimal[$"{param.Name} Final"], Override.MatchTypeEnum.NameAndType);
         }
 
         /// <summary>
@@ -523,15 +561,7 @@ namespace Models.Optimisation
         /// <param name="path">Path to the .Rdata file on disk.</param>
         public DataTable ReadRData(string path)
         {
-            StringBuilder script = new StringBuilder();
-            script.AppendLine($"load('{path.Replace(@"\", @"\\")}')");
-            IEnumerable<string> paramNames = Parameters.Select(p => $"'{p.Name}'");
-            script.AppendLine($"param_names <- c({string.Join(", ", paramNames)})");
-            script.AppendLine(ReflectionUtilities.GetResourceAsString("Models.Resources.RScripts.read_croptimizr_output.r"));
-            R r = new R();
-            string scriptPath = GetTempFileName("read_croptimizr_output", ".r");
-            File.WriteAllText(scriptPath, script.ToString());
-            DataTable table = r.RunToTable(scriptPath);
+            DataTable table = ApsimTextFile.ToTable(path);
 
             // The repetition column will be of type float. Need to change this to int.
             string repCol = "Repetition";
@@ -543,6 +573,19 @@ namespace Models.Optimisation
 
             table.TableName = "CroptimizR";
             return table;
+        }
+
+        private string CreateReadRDataScript(string rDataPath)
+        {
+            StringBuilder script = new StringBuilder();
+            string directory = Path.GetDirectoryName(rDataPath).Replace(@"\", "/");
+            string csvFile = $"{directory}/{outputCsvFileName}";
+            script.AppendLine($"output_file <- '{csvFile}'");
+            script.AppendLine($"load('{rDataPath.Replace(@"\", "/")}')");
+            IEnumerable<string> paramNames = Parameters.Select(p => $"'{p.Name}'");
+            script.AppendLine($"param_names <- c({string.Join(", ", paramNames)})");
+            script.AppendLine(ReflectionUtilities.GetResourceAsString("Models.Resources.RScripts.read_croptimizr_output.r"));
+            return script.ToString();
         }
     }
 }

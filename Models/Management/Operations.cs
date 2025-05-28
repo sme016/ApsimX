@@ -1,14 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
-using Models.Core;
-using System.IO;
-using System.Reflection;
-using Newtonsoft.Json;
 using System.Globalization;
+using System.Linq;
+using System.Reflection;
+using System.Text.RegularExpressions;
+using APSIM.Numerics;
 using APSIM.Shared.Utilities;
+using Models.Core;
+using Newtonsoft.Json;
 
 namespace Models
 {
@@ -26,12 +25,32 @@ namespace Models
             Enabled = true;
         }
 
+        /// <summary>
+        ///
+        /// </summary>
+        public Operation(bool enabled, string date, string action, string line)
+        {
+            Enabled = enabled;
+            Date = date;
+            Action = action;
+            Line = line;
+        }
+
+        /// <summary>
+        /// Used to determine whether the operation is enabled or not.
+        /// </summary>
+        public bool Enabled { get; set; }
+
         /// <summary>Gets or sets the date.</summary>
         public string Date { get; set; }
 
         /// <summary>Gets or sets the action.</summary>
         /// <value>The action.</value>
         public string Action { get; set; }
+
+        /// <summary>Gets or sets the line shown in the view.</summary>
+        /// <value>A string</value>
+        public string Line { get; set; }
 
         /// <summary>Gets the action model.</summary>
         /// <returns></returns>
@@ -45,9 +64,73 @@ namespace Models
         }
 
         /// <summary>
-        /// Used to determine whether the operation is enabled or not.
+        /// Parses a string into an Operation
+        /// Format: // 2000-01-01 [NodeName].Function(1000)
         /// </summary>
-        public bool Enabled { get; set; }
+        /// <param name="line">The string to parse</param>
+        /// <returns>An Operation or null if there was an error parsing the string</returns>
+        public static Operation ParseOperationString(string line)
+        {
+            try
+            {
+                if (line == null)
+                    return null;
+
+                string lineTrimmed = line.Trim();
+
+                if (lineTrimmed.Length == 0) //if line is empty, treat as comment
+                {
+                    Operation operation = new Operation();
+                    operation.Line = "";
+                    operation.Enabled = false;
+                    operation.Date = null;
+                    operation.Action = null;
+                    return operation;
+                }
+
+                Regex parser = new Regex(@"\s*(\S*)\s+(.+)$");
+                Regex commentParser = new Regex(@"^(\/\/)");
+
+                Match match = commentParser.Match(lineTrimmed);
+                if (match.Success)
+                {
+                    Operation operation = new Operation();
+                    operation.Line = line;
+                    operation.Enabled = false;
+                    operation.Date = null;
+                    operation.Action = null;
+                    return operation;
+                }
+
+                match = parser.Match(lineTrimmed);
+                if (match.Success)
+                {
+                    Operation operation = new Operation();
+                    operation.Line = line;
+                    operation.Enabled = true;
+
+                    string dateString = match.Groups[1].Value;
+                    operation.Date = DateUtilities.ValidateDateString(dateString);
+                    if (operation.Date == null)
+                        return null;
+
+                    if (match.Groups[2].Value.Length > 0)
+                        operation.Action = match.Groups[2].Value;
+                    else
+                        return null;
+
+                    return operation;
+                }
+                else
+                {
+                    return null;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
     }
 
     /// <summary>This class encapsulates an operations schedule.</summary>
@@ -61,11 +144,79 @@ namespace Models
     public class Operations : Model
     {
         /// <summary>The clock</summary>
-        [Link] Clock Clock = null;
+        [Link] IClock Clock = null;
 
         /// <summary>Gets or sets the schedule.</summary>
         /// <value>The schedule.</value>
-        public List<Operation> Operation { get; set; }
+        public List<Operation> OperationsList { get; set; }
+
+        /// <summary>
+        /// Invoked at start of simulation.
+        /// </summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+        [EventSubscribe("StartOfSimulation")]
+        private void OnStartOfSimulation(object sender, EventArgs e)
+        {
+            //check that all operation lines parse correctly
+            if (this.Enabled && this.OperationsList != null)
+                foreach(Operation op in OperationsList)
+                    if (Operation.ParseOperationString(op.Line) == null)
+                        throw new Exception($"{this.FullPath}: Unable to parse operation '{op.Line}'");
+        }
+
+        /// <summary>Gets or sets the schedule.</summary>
+        /// <value>The schedule.</value>
+        [JsonIgnore]
+        public string OperationsAsString {
+            get {
+                string output = "";
+                if (OperationsList != null)
+                {
+                    foreach (Operation operation in OperationsList)
+                    {
+                        if (operation.Action != null)
+                        {
+                            string dateStr = null;
+                            if (!string.IsNullOrEmpty(operation.Date))
+                                dateStr = DateUtilities.ValidateDateString(operation.Date);
+                            string commentChar = operation.Enabled ? string.Empty : "// ";
+                            output += commentChar + dateStr + " " + operation.Action;
+                        }
+                        else
+                        {
+                            output += operation.Line;
+                        }
+                        output += Environment.NewLine;
+                    }
+                }
+                return output;
+            }
+            set {
+                List<string> lines = value.Split('\n').ToList();
+                OperationsList = new List<Operation>();
+                foreach (string line in lines)
+                {
+                    if (line.Length > 0)
+                    {
+                        string lineTrimmed = line;
+                        lineTrimmed = lineTrimmed.Replace("\n", string.Empty);
+                        lineTrimmed = lineTrimmed.Replace("\r", string.Empty);
+                        lineTrimmed = lineTrimmed.Trim();
+
+                        Operation operation = Operation.ParseOperationString(lineTrimmed);
+                        if (operation != null)
+                        {
+                            OperationsList.Add(operation);
+                        }
+                        else
+                        {
+                            OperationsList.Add(new Operation(false, null, null, lineTrimmed));
+                        }
+                    }
+                }
+            }
+        }
 
         /// <summary>Simulation is commencing.</summary>
         /// <param name="sender">The sender.</param>
@@ -82,13 +233,16 @@ namespace Models
         [EventSubscribe("DoManagement")]
         private void OnDoManagement(object sender, EventArgs e)
         {
-            if (Operation == null)
-                Operation = new List<Operation>();
+            if (OperationsList == null)
+                OperationsList = new List<Operation>();
 
             DateTime operationDate;
-            foreach (Operation operation in Operation.Where(o => o.Enabled))
+            foreach (Operation operation in OperationsList.Where(o => o.Enabled))
             {
-                operationDate = DateUtilities.validateDateString(operation.Date, Clock.Today.Year);
+                if (operation.Date == null || operation.Action == null)
+                    throw new Exception($"Error: Operation line '{operation.Line}' cannot be parsed.");
+
+                operationDate = DateUtilities.GetDate(operation.Date, Clock.Today.Year);
                 if (operationDate == Clock.Today)
                 {
                     string st = operation.Action;
@@ -165,8 +319,9 @@ namespace Models
         {
             // convert arguments to an object array.
             ParameterInfo[] parameters = method.GetParameters();
+            int numMandatoryParameters = parameters.Where(p => !p.HasDefaultValue).Count();
             object[] parameterValues = new object[parameters.Length];
-            if (arguments.Length > parameters.Length)
+            if (arguments.Length < numMandatoryParameters)
                 return null;
 
             //retrieve the values for the named arguments that were provided. (not all the named arguments for the method may have been provided)
@@ -213,6 +368,18 @@ namespace Models
                         value = value.Substring(posLastPeriod + 1);
                     parameterValues[argumentIndex] = Enum.Parse(parameters[argumentIndex].ParameterType, value);
                 }
+                else if (parameters[argumentIndex].ParameterType.IsArray)
+                {
+                    string[] tokens = value.Split(' ');
+                    var elementType = parameters[argumentIndex].ParameterType.GetElementType();
+                    if (elementType == typeof(double))
+                        parameterValues[argumentIndex] = MathUtilities.StringsToDoubles(tokens);
+                    else if (elementType == typeof(int))
+                        parameterValues[argumentIndex] = MathUtilities.StringsToIntegers(tokens);
+                    else if (elementType == typeof(string))
+                        parameterValues[argumentIndex] = tokens;
+                }
+
             }
 
             //if there were missing named arguments in the method call then use the default values for them.

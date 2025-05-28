@@ -1,11 +1,5 @@
 using System;
-using System.Collections.Generic;
-using System.Text;
-
 using Models.Core;
-using APSIM.Shared.Utilities;
-using Models.Interfaces;
-using APSIM.Shared.Documentation;
 
 namespace Models.Functions.SupplyFunctions
 {
@@ -59,7 +53,7 @@ namespace Models.Functions.SupplyFunctions
         /// <param name="fPARdir"></param>
         /// <param name="fPARdif"></param>
         /// <returns></returns>
-        public double Value( double fPgMax, double fLUE, double fLAI,
+        public double Value(double fPgMax, double fLUE, double fLAI,
                                         double fLatitude, int nDay, double fHour, double fPARdir, double fPARdif)
         {
             int i, j;
@@ -155,17 +149,6 @@ namespace Models.Functions.SupplyFunctions
             FGROS = FGROS * vLAI;
 
             return FGROS;
-        }
-
-        /// <summary>Document the model.</summary>
-        public override IEnumerable<ITag> Document()
-        {
-            // Write description of this class from summary and remarks XML documentation.
-            foreach (var tag in GetModelDescription())
-                yield return tag;
-
-            foreach (var tag in DocumentChildren<IModel>())
-                yield return tag;
         }
     }
 }

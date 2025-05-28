@@ -1,16 +1,16 @@
-﻿namespace Models
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Functions;
+
+namespace Models
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Functions;
-    using System;
-    using System.Collections.Generic;
-    using System.Linq;
-    using System.Text;
-    using System.Threading.Tasks;
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public class VariableGroup
     {
@@ -19,10 +19,10 @@
 
         /// <summary>The values for each report event (e.g. daily) for a group.</summary>
         private readonly List<object> valuesToAggregate = new List<object>();
-            
+
         /// <summary>The full name of the variable we are retrieving from APSIM.</summary>
         private readonly string variableName;
-            
+
         /// <summary>The aggregation (e.g. sum) to apply to the values in each group.</summary>
         private readonly string aggregationFunction;
 
@@ -48,7 +48,7 @@
         /// <summary>Stores a value into the values array.</summary>
         public void StoreValue()
         {
-            object value = locator.Get(variableName);
+            object value = locator.Get(variableName, LocatorFlags.IncludeReportVars);
             if (value is IFunction function)
                 value = function.Value();
             else if (value != null && (value.GetType().IsArray || value.GetType().IsClass))
@@ -75,8 +75,8 @@
                 throw new Exception($"In report, cannot find a value to return for variable {variableName}");
             else
                 return valuesToAggregate.Last();
-        }        
-        
+        }
+
         /// <summary>Clear the values.</summary>
         public void Clear()
         {
@@ -124,5 +124,5 @@
             return result;
         }
     }
-    
+
 }

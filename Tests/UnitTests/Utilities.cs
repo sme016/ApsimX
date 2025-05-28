@@ -1,21 +1,20 @@
-﻿
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using APSIM.Shared.JobRunning;
+using APSIM.Shared.Utilities;
+using Models;
+using Models.Core;
+using Models.Core.ApsimFile;
+using Models.Storage;
+using NUnit.Framework;
+
 namespace UnitTests
 {
-    using APSIM.Shared.JobRunning;
-    using APSIM.Shared.Utilities;
-    using Models;
-    using Models.Core;
-    using Models.Core.ApsimFile;
-    using Models.GrazPlan;
-    using Models.Storage;
-    using NUnit.Framework;
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.IO;
-    using System.Linq;
-    using System.Reflection;
-    using System.Text;
+
 
     [SetUpFixture]
     public static class Utilities
@@ -63,14 +62,30 @@ namespace UnitTests
         /// <summary>Call an event in a model</summary>
         public static void CallEvent(object model, string eventName, object[] arguments = null)
         {
-            MethodInfo eventToInvoke = model.GetType().GetMethod("On" + eventName, BindingFlags.Instance | BindingFlags.NonPublic);
+            CallMethod(model, "On" + eventName, arguments);
+        }
+
+        /// <summary>Call a private method in a model</summary>
+        public static object CallMethod(object model, string methodName, object[] arguments = null)
+        {
+            object returnValue = null;
+            MethodInfo eventToInvoke = model.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
             if (eventToInvoke != null)
             {
                 if (arguments == null)
                     arguments = new object[] { model, new EventArgs() };
-                eventToInvoke.Invoke(model, arguments);
+                returnValue = eventToInvoke.Invoke(model, arguments);
             }
+            return returnValue;
         }
+
+        /// <summary>Call a private method in a model</summary>
+        public static void SetProperty(object model, string propertyName, object value)
+        {
+            PropertyInfo property = model.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (property != null)
+                property.SetValue(model, value);
+        }        
 
         /// <summary>Call an event in a model and all child models.</summary>
         public static void CallEventAll(IModel model, string eventName, object[] arguments = null)
@@ -141,7 +156,7 @@ namespace UnitTests
 
         public static string RunModels(string arguments)
         {
-            return RunModels(StringUtilities.SplitStringHonouringQuotes(arguments, " ").Cast<string>().ToArray());
+            return RunModels(StringUtilities.SplitStringHonouringQuotes(arguments, " ").ToArray());
         }
 
         public static string RunModels(string[] arguments)
@@ -167,14 +182,14 @@ namespace UnitTests
         /// <summary>
         /// Returns a lightweight skeleton simulation which can be run.
         /// </summary>
-        public static Simulations GetRunnableSim()
+        public static Simulations GetRunnableSim(bool useInMemoryDb = false)
         {
             Simulations sims = new Simulations()
             {
                 FileName = Path.ChangeExtension(Path.GetTempFileName(), ".apsimx"),
                 Children = new List<IModel>()
                 {
-                    new DataStore(),
+                    new DataStore() { UseInMemoryDB = useInMemoryDb },
                     new Simulation()
                     {
                         Children = new List<IModel>()
@@ -220,7 +235,7 @@ namespace UnitTests
         public static T ReadFromResource<T>(string resourceName, Action<Exception> errorHandler) where T : IModel
         {
             string json = ReflectionUtilities.GetResourceAsString(resourceName);
-            return FileFormat.ReadFromString<T>(json, errorHandler, false);
+            return (T)FileFormat.ReadFromString<T>(json, errorHandler, false).NewModel;
         }
 
         /// <summary>

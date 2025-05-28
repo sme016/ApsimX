@@ -881,6 +881,7 @@
     },
     "Genotype": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -937,7 +938,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -1268,6 +1269,7 @@
     "standardReferenceWeight": 40.0,
     "LiveWeight": 292.49687278263275,
     "BaseWeight": 282.2315671495314,
+    "EmptyBodyWeight": 258.9280432564508,
     "EmptyShornWeight": 282.55361068538025,
     "FleeceCutWeight": 9.845707463298087,
     "WoolWeight": 10.16775099914698,
@@ -1276,6 +1278,7 @@
     "FibreDiam": 26.315578743325368,
     "MatedTo": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -1332,7 +1335,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -5473,7 +5476,7 @@
     "MaleWeight": 0.0,
     "FemaleWeight": 292.49687278263275,
     "DrySheepEquivs": 0.0,
-    "PotIntake": -313.05604613419615,
+    "PotIntake": -98.10242793510857,
     "MethaneWeight": 0.0,
     "SupplementFreshWeightIntake": 0.0,
     "IntakeSupplement": {
@@ -6381,6 +6384,7 @@
     },
     "Genotype": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -6437,7 +6441,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -6768,6 +6772,7 @@
     "standardReferenceWeight": 40.0,
     "LiveWeight": 292.49687278263275,
     "BaseWeight": 282.1632789057648,
+    "EmptyBodyWeight": 258.8653934915273,
     "EmptyShornWeight": 282.4853224416137,
     "FleeceCutWeight": 9.845707463298087,
     "WoolWeight": 10.16775099914698,
@@ -6776,6 +6781,7 @@
     "FibreDiam": 26.315578743325368,
     "MatedTo": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -6832,7 +6838,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -10973,7 +10979,7 @@
     "MaleWeight": 0.0,
     "FemaleWeight": 292.49687278263275,
     "DrySheepEquivs": 0.0,
-    "PotIntake": -312.8851887742006,
+    "PotIntake": -98.04888633432134,
     "MethaneWeight": 0.0,
     "SupplementFreshWeightIntake": 0.0,
     "IntakeSupplement": {
@@ -11881,6 +11887,7 @@
     },
     "Genotype": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -11937,7 +11944,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -12268,6 +12275,7 @@
     "standardReferenceWeight": 40.0,
     "LiveWeight": 303.2271235972977,
     "BaseWeight": 292.95621131251556,
+    "EmptyBodyWeight": 268.7671663417574,
     "EmptyShornWeight": 293.28635884368924,
     "FleeceCutWeight": 9.842021719185752,
     "WoolWeight": 10.172169250359438,
@@ -12276,6 +12284,7 @@
     "FibreDiam": 26.315578743325368,
     "MatedTo": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -12332,7 +12341,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -16473,7 +16482,7 @@
     "MaleWeight": 0.0,
     "FemaleWeight": 303.2271235972977,
     "DrySheepEquivs": 0.0,
-    "PotIntake": -309.00091655432084,
+    "PotIntake": -96.83124141388699,
     "MethaneWeight": 0.0,
     "SupplementFreshWeightIntake": 0.0,
     "IntakeSupplement": {
@@ -17381,6 +17390,7 @@
     },
     "Genotype": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -17437,7 +17447,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -17768,6 +17778,7 @@
     "standardReferenceWeight": 40.0,
     "LiveWeight": 303.2271235972977,
     "BaseWeight": 292.8870911884212,
+    "EmptyBodyWeight": 268.70375338387265,
     "EmptyShornWeight": 293.2172387195949,
     "FleeceCutWeight": 9.842021719185752,
     "WoolWeight": 10.172169250359438,
@@ -17776,6 +17787,7 @@
     "FibreDiam": 26.315578743325368,
     "MatedTo": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -17832,7 +17844,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -21973,7 +21985,7 @@
     "MaleWeight": 0.0,
     "FemaleWeight": 303.2271235972977,
     "DrySheepEquivs": 0.0,
-    "PotIntake": -308.8364667826744,
+    "PotIntake": -96.77970798894985,
     "MethaneWeight": 0.0,
     "SupplementFreshWeightIntake": 0.0,
     "IntakeSupplement": {
@@ -22881,6 +22893,7 @@
     },
     "Genotype": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -22937,7 +22950,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -23268,6 +23281,7 @@
     "standardReferenceWeight": 40.0,
     "LiveWeight": 304.5194718911038,
     "BaseWeight": 294.2479111452133,
+    "EmptyBodyWeight": 269.9522120598287,
     "EmptyShornWeight": 294.5790280112044,
     "FleeceCutWeight": 9.841557712287706,
     "WoolWeight": 10.172674578278764,
@@ -23276,6 +23290,7 @@
     "FibreDiam": 26.315578743325368,
     "MatedTo": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -23332,7 +23347,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -27473,7 +27488,7 @@
     "MaleWeight": 0.0,
     "FemaleWeight": 304.5194718911038,
     "DrySheepEquivs": 0.0,
-    "PotIntake": -308.43362762864865,
+    "PotIntake": -96.65342050940828,
     "MethaneWeight": 0.0,
     "SupplementFreshWeightIntake": 0.0,
     "IntakeSupplement": {
@@ -28381,6 +28396,7 @@
     },
     "Genotype": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -28437,7 +28453,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -28768,6 +28784,7 @@
     "standardReferenceWeight": 40.0,
     "LiveWeight": 304.5194718911038,
     "BaseWeight": 294.17869082788667,
+    "EmptyBodyWeight": 269.8887071815474,
     "EmptyShornWeight": 294.50980769387775,
     "FleeceCutWeight": 9.841557712287706,
     "WoolWeight": 10.172674578278764,
@@ -28776,6 +28793,7 @@
     "FibreDiam": 26.315578743325368,
     "MatedTo": {
       "Name": "Small Merino",
+      "ResourceName": null,
       "Children": [],
       "Enabled": true,
       "ReadOnly": false,
@@ -28832,7 +28850,7 @@
         20.0,
         3.0,
         1.5,
-        0.0
+        1.4
       ],
       "IntakeLactC": [
         0.524,
@@ -32973,7 +32991,7 @@
     "MaleWeight": 0.0,
     "FemaleWeight": 304.5194718911038,
     "DrySheepEquivs": 0.0,
-    "PotIntake": -308.2699634327514,
+    "PotIntake": -96.60213328605974,
     "MethaneWeight": 0.0,
     "SupplementFreshWeightIntake": 0.0,
     "IntakeSupplement": {

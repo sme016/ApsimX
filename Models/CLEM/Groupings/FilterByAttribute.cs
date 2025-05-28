@@ -7,7 +7,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.IO;
-using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -22,6 +21,7 @@ namespace Models.CLEM.Groupings
     [Description("Defines a filter rule using Attribute details of the individual")]
     [ValidParent(ParentType = typeof(IFilterGroup))]
     [Version(1, 0, 0, "")]
+    [HelpUri(@"Content/Features/Filters/FilterByAttribute.htm")]
     public class FilterByAttribute : Filter, IValidatableObject
     {
         /// <summary>
@@ -49,7 +49,7 @@ namespace Models.CLEM.Groupings
             if (Validator.TryValidateObject(this, context, results, true))
             {
                 Initialise();
-                Rule = Compile<IFilterable>();
+                BuildRule();
             }
         }
 
@@ -80,7 +80,9 @@ namespace Models.CLEM.Groupings
                     simpleBinary = Expression.MakeBinary(ExpressionType.Equal, exists, simpleVal);
                 }
                 else
+                {
                     simpleBinary = Expression.MakeBinary(Operator, exists, simpleVal);
+                }
 
                 block = Expression.Condition(
                         attIsNull,
@@ -105,14 +107,10 @@ namespace Models.CLEM.Groupings
                 var valueVal = Expression.TypeAs(Expression.Call(attProperty, valueMethod, tag), typeof(IndividualAttribute));
                 var valueStored = Expression.Property(valueVal, "Value");
                 var valueStoredType = ((PropertyInfo)valueStored.Member).PropertyType;
-                //var valisnull = Expression.Equal(Express valueStored, Expression.Constant(null));
                 var value = Expression.Convert(valueStored, valueStoredType);
 
                 var simpleVal = Expression.Constant(Convert.ChangeType(Value ?? 0, valueStoredType));
                 simpleBinary = Expression.MakeBinary(Operator, value, simpleVal);
-                //var nullBinary = Expression.AndAlso(valisnull, Expression.Convert(binary, typeof(bool)));
-
-                //simpleBinary = Expression.Convert(Expression.IfThenElse(existsResult, nullBinary, Expression.Constant(false, typeof(bool))), typeof(bool));
 
                 block = Expression.Condition(
                     // Attributes exist
@@ -133,12 +131,18 @@ namespace Models.CLEM.Groupings
             return Expression.Lambda<Func<T, bool>>(block, simpleFilterParam).Compile();
         }
 
-        /// <summary>
-        /// Initialise this filter by property 
-        /// </summary>
+        /// <inheritdoc/>
         public override void Initialise()
         {
         }
+
+        /// <inheritdoc/>
+        public override void BuildRule()
+        {
+            if (Rule is null)
+                Rule = Compile<IFilterable>();
+        }
+
 
         /// <summary>
         /// Constructor
@@ -174,15 +178,21 @@ namespace Models.CLEM.Groupings
                 bool truefalse = IsOperatorTrueFalseTest();
                 if (FilterStyle == AttributeFilterStyle.Exists | truefalse)
                 {
-                    filterWriter.Write(" is");
+                    bool nothingAdded = true;
                     if (truefalse)
                         if (Operator == ExpressionType.IsFalse | Value?.ToString().ToLower() == "false")
-                            filterWriter.Write(" not");
-                    filterWriter.Write($" Attribute({CLEMModel.DisplaySummaryValueSnippet(AttributeTag, "No tag", htmlTags: htmltags, entryStyle: HTMLSummaryStyle.Filter)})");
+                        {
+                            filterWriter.Write(" does not have");
+                            nothingAdded = false;
+                        }
+                    if(nothingAdded)
+                        filterWriter.Write(" has");
+
+                    filterWriter.Write($" attribute {CLEMModel.DisplaySummaryValueSnippet(AttributeTag, "No tag", htmlTags: htmltags, entryStyle: HTMLSummaryStyle.Filter)}");
                 }
                 else
                 {
-                    filterWriter.Write($" Attribute-{CLEMModel.DisplaySummaryValueSnippet(AttributeTag, "No tag", htmlTags: htmltags, entryStyle: HTMLSummaryStyle.Filter)}");
+                    filterWriter.Write($" Attribute {CLEMModel.DisplaySummaryValueSnippet(AttributeTag, "No tag", htmlTags: htmltags, entryStyle: HTMLSummaryStyle.Filter)}");
                     filterWriter.Write($" {CLEMModel.DisplaySummaryValueSnippet(OperatorToSymbol(), "Unknown operator", htmlTags: htmltags, entryStyle: HTMLSummaryStyle.Filter)}");
                     filterWriter.Write($" {CLEMModel.DisplaySummaryValueSnippet(Value?.ToString(), "No value", htmlTags: htmltags, entryStyle: HTMLSummaryStyle.Filter)}");
                 }

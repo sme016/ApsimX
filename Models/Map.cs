@@ -1,13 +1,8 @@
 ﻿using System;
-using System.Text;
-using Models.Core;
-using Newtonsoft.Json;
-using System.Xml;
 using System.Collections.Generic;
-using APSIM.Shared.Utilities;
-using Models.Climate;
 using System.Linq;
-using APSIM.Shared.Documentation;
+using Models.Climate;
+using Models.Core;
 using Models.Mapping;
 
 namespace Models
@@ -19,7 +14,7 @@ namespace Models
     [ViewName("UserInterface.Views.MapView")]
     [PresenterName("UserInterface.Presenters.MapPresenter")]
     [ValidParent(DropAnywhere = true)]
-    public class Map : Model, AutoDocumentation.ITag
+    public class Map : Model
     {
         /// <summary>List of coordinates to show on map</summary>
         public List<Coordinate> GetCoordinates(List<string> names = null)
@@ -27,6 +22,7 @@ namespace Models
             List<Coordinate> coordinates = new List<Coordinate>();
             if (names != null)
                 names.Clear();
+            else names = new List<string>();
 
             foreach (Weather weather in FindAllInScope<Weather>().Where(w => w.Enabled))
             {
@@ -45,7 +41,7 @@ namespace Models
 
             if (coordinates.Count == 0)
             {
-                foreach (var soil in this.FindAllInScope<Models.Soils.Soil>())
+                foreach (var soil in FindAllInScope<Soils.Soil>())
                 {
                     double latitude = soil.Latitude;
                     double longitude = soil.Longitude;
@@ -98,13 +94,5 @@ namespace Models
         /// Zoom level
         /// </summary>
         private Double _Zoom = 1.0;
-
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            yield return new MapTag(Center, _Zoom, GetCoordinates());
-        }
     }
 }

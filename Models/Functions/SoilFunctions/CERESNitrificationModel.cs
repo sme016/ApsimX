@@ -1,6 +1,6 @@
 ﻿using System;
 using Models.Core;
-using Models.Soils.Nutrients;
+using Models.Soils;
 
 namespace Models.Functions
 {
@@ -9,20 +9,36 @@ namespace Models.Functions
     /// \retval fraction of NH4 nitrified.
     [Serializable]
     [Description("Soil NH4 Nitrification model from CERES-Maize")]
+    [PresenterName("UserInterface.Presenters.PropertyPresenter")]
+    [ViewName("UserInterface.Views.PropertyView")]
     public class CERESNitrificationModel : Model, IFunction
     {
 
         [Link(ByName = true)]
         Solute NH4 = null;
 
-        [Link(Type = LinkType.Child)]
-        CERESMineralisationTemperatureFactor CERESTF = null;
+        [Link(ByName = true)]
+        CERESMineralisationTemperatureFactor TF = null;
 
         [Link(Type = LinkType.Child)]
         CERESNitrificationWaterFactor CERESWF = null;
 
         [Link(Type = LinkType.Child)]
         CERESNitrificationpHFactor CERESpHF = null;
+
+        /// <summary>
+        /// Potential Nitrification Rate at high NH4 concentration and optimal soil conditions.
+        /// </summary>
+        [Description("Potential Nitrification Rate")]
+        [Units("kg/ha/d")]
+        public double PotentialNitrificationRate { get; set; } = 40;
+
+        /// <summary>
+        /// NH4 concentration at which nitrification would be half the potential rate.
+        /// </summary>
+        [Description("Concentration at Half Max")]
+        [Units("ppm")]
+        public double ConcentrationAtHalfMax { get; set; } = 90;
 
         /// <summary>Gets the value.</summary>
         /// <value>The value.</value>
@@ -31,12 +47,12 @@ namespace Models.Functions
             if (arrayIndex == -1)
                 throw new Exception("Layer number must be provided to CERES Nitrification Model");
 
-            double PotentialRate = 40 / (NH4.ppm[arrayIndex] + 90);
+            double PotentialRate = PotentialNitrificationRate / (NH4.ppm[arrayIndex] + ConcentrationAtHalfMax);
 
-            double RateModifier = CERESTF.Value(arrayIndex);
+            double RateModifier = TF.Value(arrayIndex);
             RateModifier = Math.Min(RateModifier, CERESWF.Value(arrayIndex));
             RateModifier = Math.Min(RateModifier, CERESpHF.Value(arrayIndex));
-                       
+
             return PotentialRate * RateModifier;
         }
     }

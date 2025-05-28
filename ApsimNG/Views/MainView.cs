@@ -1,20 +1,18 @@
-﻿namespace UserInterface.Views
-{
-    using APSIM.Shared.Utilities;
-    using Gtk;
-    using Models.Core;
+﻿using APSIM.Shared.Utilities;
+using Gtk;
+using System;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using UserInterface.EventArguments;
+using UserInterface.Interfaces;
+using Utility;
+using MessageType = Models.Core.MessageType;
 
-    using System;
-    using System.Drawing;
-    using System.IO;
-    using System.Reflection;
-    using System.Linq;
-    using Interfaces;
-    using EventArguments;
-    using global::UserInterface.Extensions;
-    using System.Text;
-    using Utility;
-    using MessageType = Models.Core.MessageType;
+namespace UserInterface.Views
+{
 
     /// <summary>An enum type for the AskQuestion method.</summary>
     public enum QuestionResponseEnum { Yes, No, Cancel }
@@ -97,22 +95,27 @@
         /// <summary>
         /// Gtk box which holds <see cref="listButtonView1"/>.
         /// </summary>
-        private VBox vbox1 = null;
+        private Box vbox1 = null;
 
         /// <summary>
         /// Gtk box which holds <see cref="listButtonView2"/>.
         /// </summary>
-        private VBox vbox2 = null;
+        private Box vbox2 = null;
 
         /// <summary>
         /// Gtk widget which holds the two sets of tabs.
         /// </summary>
-        private HPaned hpaned1 = null;
+        private Paned hpaned1 = null;
 
         /// <summary>
         /// Gtk widget which holds the status panel.
         /// </summary>
         private Widget hbox1 = null;
+
+        /// <summary>
+        /// Gtk vpane which holds two main parts of the viuw
+        /// </summary>
+        private Paned vpaned1 = null;
 
         /// <summary>
         /// Dialog which allows the user to change fonts.
@@ -126,7 +129,7 @@
         /// </summary>
         public MainView(ViewBase owner = null) : base(owner)
         {
-            MasterView = this;
+            MasterView = (Interfaces.IMainView)this;
             numberOfButtons = 0;
             Builder builder = BuilderFromResource("ApsimNG.Resources.Glade.MainView.glade");
             window1 = (Window)builder.GetObject("window1");
@@ -136,10 +139,11 @@
             stopButton = (Button)builder.GetObject("stopButton");
             notebook1 = (Notebook)builder.GetObject("notebook1");
             notebook2 = (Notebook)builder.GetObject("notebook2");
-            vbox1 = (VBox)builder.GetObject("vbox1");
-            vbox2 = (VBox)builder.GetObject("vbox2");
-            hpaned1 = (HPaned)builder.GetObject("hpaned1");
+            vbox1 = (Box)builder.GetObject("vbox1");
+            vbox2 = (Box)builder.GetObject("vbox2");
+            hpaned1 = (Paned)builder.GetObject("hpaned1");
             hbox1 = (Widget)builder.GetObject("vbox3");
+            vpaned1 = (Paned)builder.GetObject("vpaned1");
             mainWidget = window1;
             window1.Icon = new Gdk.Pixbuf(null, "ApsimNG.Resources.apsim logo32.png");
             listButtonView1 = new ListButtonView(this);
@@ -152,6 +156,8 @@
             hpaned1.PositionSet = true;
             hpaned1.Child2.Hide();
             hpaned1.Child2.NoShowAll = true;
+            hpaned1.AddNotification(OnDividerNotified);
+            vpaned1.AddNotification(OnDividerNotified);
 
             notebook1.SetMenuLabel(vbox1, LabelWithIcon(indexTabText, "go-home"));
             notebook2.SetMenuLabel(vbox2, LabelWithIcon(indexTabText, "go-home"));
@@ -223,6 +229,7 @@
             if (ProcessUtilities.CurrentOS.IsMac)
             {
                 InitMac();
+                Utility.Configuration.Settings.DarkTheme = false;
                 //Utility.Configuration.Settings.DarkTheme = Utility.MacUtilities.DarkThemeEnabled();
             }
 
@@ -277,7 +284,7 @@
                 ShowError(err);
             }
         }
-        
+
         /// <summary>
         /// Invoked when an error has been thrown in a view.
         /// </summary>
@@ -303,6 +310,9 @@
         /// </summary>
         public event EventHandler ShowDetailedError;
 
+        /// <summary>Invoked when the divider position is changed</summary>
+        public event EventHandler DividerChanged;
+
         /// <summary>
         /// Get the list and button view
         /// </summary>
@@ -316,15 +326,38 @@
         /// <summary>
         /// Controls the height of the status panel.
         /// </summary>
-        public int StatusPanelHeight
+        public int StatusPanelPosition
         {
             get
             {
-                return hbox1.Allocation.Height;
+                return vpaned1.Position;
             }
             set
             {
-                hbox1.HeightRequest = value;
+                vpaned1.Position = value;
+            }
+        }
+
+        /// <summary>
+        /// Height of the Paned that holds the view
+        /// </summary>
+        public int PanelHeight
+        {
+            get { return vpaned1.AllocatedHeight; }
+        }
+
+        /// <summary>
+        /// Controls the width of the tree panel.
+        /// </summary>
+        public int TreePanelWidth
+        {
+            get
+            {
+                return vpaned1.Position;
+            }
+            set
+            {
+                vpaned1.Position = value;
             }
         }
 
@@ -362,7 +395,7 @@
                 tabLabel.Text = Path.GetFileNameWithoutExtension(text);
             else
                 tabLabel.Text = text;
-            HBox headerBox = new HBox();
+            Box headerBox = new Box(Orientation.Horizontal, 0);
             Button closeBtn = new Button();
             string imageName = Utility.Configuration.Settings.DarkTheme ? "Close.dark.svg" : "Close.light.svg";
             Gtk.Image closeImg = new Gtk.Image(new Gdk.Pixbuf(null, $"ApsimNG.Resources.TreeViewImages.{imageName}", 12, 12));
@@ -443,14 +476,14 @@
             {
                 Widget tab = (ownerView as ExplorerView).MainWidget;
                 Notebook notebook = tab.IsAncestor(notebook1) ? notebook1 : notebook2;
-                
+
                 // The top level of the "label" is an EventBox
                 EventBox ebox = (EventBox)notebook.GetTabLabel(tab);
                 ebox.TooltipText = tooltip;
                 ebox.HasTooltip = !String.IsNullOrEmpty(tooltip);
-                // The EventBox holds an HBox
-                HBox hbox = (HBox)ebox.Child;
-                // And the HBox has the actual label as its first child
+                // The EventBox holds an Box
+                Box hbox = (Box)ebox.Child;
+                // And the Box has the actual label as its first child
                 Label tabLabel = (Label)hbox.Children[0];
                 tabLabel.Text = newTabName;
                 // Update the context menu label
@@ -503,7 +536,8 @@
             label.Visible = true;
 
             // Attach the label and icon together
-            HBox box = new HBox(false, 4);
+            Box box = new Box(Orientation.Horizontal, 4);
+            box.Homogeneous = false;
             box.PackStart(image, false, true, 0);
             box.PackStart(label, false, true, 0);
             box.Visible = true;
@@ -629,6 +663,31 @@
         }
 
         /// <summary>
+        /// Returns the number of pages in the notebook
+        /// </summary>
+        /// <param name="onLeft">If true, use the left notebook; if false, use the right</param>
+        /// <returns></returns>
+        public int PageCount(bool onLeft)
+        {
+            Notebook notebook = onLeft ? notebook1 : notebook2;
+            return notebook.NPages;
+        }
+        /// <summary>
+        /// Close a tab.
+        /// </summary>
+        /// <param name="index">Index of the tab to be removed.</param>
+        /// <param name="onLeft">Remove from the left (true) tab control or the right (false) tab control.</param>
+        public void RemoveTab(int index, bool onLeft)
+        {
+            Notebook notebook = onLeft ? notebook1 : notebook2;
+            if (index >= notebook.NPages)
+                throw new InvalidOperationException($"Cannot remove tab {index} from {(onLeft ? "left" : "right")} tab control: only {notebook.NPages} tabs are open");
+            if (index == 0)
+                throw new InvalidOperationException($"Cannot remove home tab");
+            notebook.RemovePage(index);
+        }
+
+        /// <summary>
         /// Looks for the tab holding the specified user interface object, and makes that the active tab
         /// </summary>
         /// <param name="o">The interface object being sought; normally will be a Gtk Widget</param>
@@ -640,7 +699,7 @@
             if (tabPage >= 0 && notebook != null)
                 notebook.CurrentPage = tabPage;
         }
-        
+
         /// <summary>Gets or set the main window position.</summary>
         public Point WindowLocation
         {
@@ -879,7 +938,7 @@
             box.ShowAll();
             box.Realize();
             box.ShowAll();
-            moreInfo.ParentWindow.Cursor = new Gdk.Cursor(Gdk.CursorType.Arrow);
+            moreInfo.ParentWindow.Cursor = new Gdk.Cursor(Gdk.Display.Default, Gdk.CursorType.Arrow);
         }
 
         [GLib.ConnectBefore]
@@ -987,9 +1046,12 @@
         /// </summary>
         public void HideProgressBar()
         {
-            progressBar.Visible = false;
-            stopButton.Visible = false;
-            lblStatus.Hide();
+            Application.Invoke(delegate
+            {
+                progressBar.Visible = false;
+                stopButton.Visible = false;
+                lblStatus.Hide();
+            });
         }
 
         /// <summary>User is trying to close the application - allow that to happen?</summary>
@@ -1035,6 +1097,15 @@
             {
                 ShowError(err);
             }
+        }
+
+        /// <summary>Listens to an event of the divider position changing</summary>
+        /// <param name="sender"></param>
+        /// <param name="args"></param>
+        private void OnDividerNotified(object sender, GLib.NotifyArgs args)
+        {
+            if (DividerChanged != null)
+                DividerChanged.Invoke(sender, new EventArgs());
         }
 
         /// <summary>
@@ -1087,7 +1158,7 @@
             {
                 if (MainWindow != null)
                 {
-                    MainWindow.Cursor = value ? new Gdk.Cursor(Gdk.CursorType.Watch) : null;
+                    MainWindow.Cursor = value ? new Gdk.Cursor(Gdk.Display.Default, Gdk.CursorType.Watch) : null;
                     waiting = value;
                 }
             }
@@ -1135,21 +1206,24 @@
             Clipboard cb = Clipboard.Get(modelClipboard);
             cb.Text = text;
         }
-    }
 
-    /// <summary>An event argument structure with a string.</summary>
-    public class TabClosingEventArgs : EventArgs
-    {
-        public bool LeftTabControl;
-        public string Name;
-        public int Index;
-        public bool AllowClose = true;
-    }
+        /// <inheritdoc />
+        public (int, bool) GetCurrentTab()
+        {
+            Notebook notebook = GetCurrentNotebook();
+            if (notebook == null)
+                return (-1, false);
 
-    /// <summary>An event argument structure with a field for allow to close.</summary>
-    public class AllowCloseArgs : EventArgs
-    {
-        public bool AllowClose;
+            bool onLeft = notebook.Name == notebook1.Name;
+            return (notebook.CurrentPage, onLeft);
+        }
+
+        private Notebook GetCurrentNotebook()
+        {
+            if (!notebook2.Visible)
+                return notebook1;
+            return hpaned1.FocusChild as Notebook;
+        }
     }
 
 }

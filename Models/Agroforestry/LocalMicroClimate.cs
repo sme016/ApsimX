@@ -1,10 +1,10 @@
 ﻿using System;
 using Models.Core;
 using Models.Climate;
-using Models.PMF;
 using Models.Interfaces;
-using APSIM.Shared.Utilities;
 using Newtonsoft.Json;
+using APSIM.Shared.Utilities;
+
 
 namespace Models.Agroforestry
 {
@@ -39,6 +39,10 @@ namespace Models.Agroforestry
         /// <summary>Gets or sets the minimum temperature (oc)</summary>
         [JsonIgnore]
         public double MinT { get { return weather.MinT; } set { weather.MinT = value; } }
+
+        /// <summary>Pan evaporation</summary>
+        [JsonIgnore]
+        public double PanEvap { get { return weather.PanEvap; } set{ weather.PanEvap = value; } }
 
         /// <summary>
         /// Daily Mean temperature (oC)
@@ -122,11 +126,11 @@ namespace Models.Agroforestry
 
         /// <summary>Met Data from yesterday</summary>
         [JsonIgnore]
-        public DailyMetDataFromFile YesterdaysMetData { get; set; }
+        public DailyMetDataFromFile YesterdaysMetData { get { return weather.YesterdaysMetData; } }
 
         /// <summary>Met Data from yesterday</summary>
         [JsonIgnore]
-        public DailyMetDataFromFile TomorrowsMetData { get; set; }
+        public DailyMetDataFromFile TomorrowsMetData { get { return weather.TomorrowsMetData; } }
 
         /// <summary>Gets the duration of the day in hours.</summary>
         public double CalculateDayLength(double Twilight) { return weather.CalculateDayLength(Twilight); }

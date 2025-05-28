@@ -1,22 +1,21 @@
-﻿using Models.CLEM.Groupings;
+﻿using APSIM.Numerics;
+using APSIM.Shared.Utilities;
+using Models.CLEM.Groupings;
 using Models.CLEM.Interfaces;
 using Models.CLEM.Resources;
 using Models.Core;
-using Models.Core.Attributes;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Models.CLEM
 {
     ///<summary>
     /// Determines the individual ruminans required for the transmutation
-    ///</summary> 
+    ///</summary>
     [Serializable]
     [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
@@ -48,7 +47,7 @@ namespace Models.CLEM
         public TransmuteStyle TransmuteStyle { get ; set; }
 
         /// <summary>
-        /// Style for direct exchange 
+        /// Style for direct exchange
         /// </summary>
         [Description("Measure of ruminant (for direct transmute)")]
         public PricingStyleType DirectExhangeStyle { get; set; }
@@ -56,6 +55,7 @@ namespace Models.CLEM
         /// <inheritdoc/>
         [Description("Amount (B) per packet (A)")]
         [Required, GreaterThanEqualValue(0)]
+        [Core.Display(EnabledCallback = "AmountPerPacketEnabled")]
         public double AmountPerPacket { get; set; }
 
         ///<inheritdoc/>
@@ -68,17 +68,22 @@ namespace Models.CLEM
         [System.ComponentModel.DefaultValueAttribute("No transactions")]
         public string FinanceTypeForTransactionsName { get; set; }
 
+        /// <summary>
+        /// Method to determine if direct transmute style will enable the amount property
+        /// </summary>
+        public bool AmountPerPacketEnabled() { return TransmuteStyle == TransmuteStyle.Direct; }
+
         ///<inheritdoc/>
-        public bool DoTransmute(ResourceRequest request, double shortfallPacketsNeeded, double requiredByActivities, ResourcesHolder holder, bool queryOnly)
+        public bool DoTransmute(ResourceRequest request, double shortfall, double requiredByActivities, ResourcesHolder holder, bool queryOnly)
         {
             double needed = 0;
             switch (TransmuteStyle)
             {
                 case TransmuteStyle.Direct:
-                    needed = shortfallPacketSize * AmountPerPacket;
+                    needed = shortfall / shortfallPacketSize * AmountPerPacket;
                     break;
                 case TransmuteStyle.UsePricing:
-                    needed = shortfallPacketsNeeded* shortfallPricing.CurrentPrice;
+                    needed = shortfall / shortfallPacketSize * shortfallPricing.CurrentPrice;
                     break;
                 default:
                     break;
@@ -110,7 +115,7 @@ namespace Models.CLEM
                             }
                             break;
                         case TransmuteStyle.UsePricing:
-                            available += ind.BreedParams.ValueofIndividual(ind, PurchaseOrSalePricingStyleType.Sale)?.CurrentPrice ?? 0;
+                            available += ind.BreedParams.GetPriceGroupOfIndividual(ind, PurchaseOrSalePricingStyleType.Sale)?.CurrentPrice ?? 0;
                             break;
                         default:
                             break;
@@ -119,8 +124,8 @@ namespace Models.CLEM
                     if (!queryOnly)
                         // remove individual from herd immediately
                         (ResourceGroup as RuminantHerd).Herd.Remove(ind);
-                    
-                    if (available >= needed)
+
+                    if (MathUtilities.IsGreaterThanOrEqual(available, needed))
                     {
                         if (queryOnly)
                             return true;
@@ -140,7 +145,7 @@ namespace Models.CLEM
                     ResourceRequest financeRequest = new ResourceRequest()
                     {
                         Resource = financeType,
-                        Required = shortfallPacketsNeeded * shortfallPacketSize * shortfallPricing.CurrentPrice,
+                        Required = shortfall / shortfallPacketSize * shortfallPricing.CurrentPrice,
                         RelatesToResource = request.ResourceTypeName,
                         ResourceType = typeof(Finance),
                         ActivityModel = request.ActivityModel,

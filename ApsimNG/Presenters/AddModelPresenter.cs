@@ -56,6 +56,7 @@
             tree.DragStarted += OnDragStart;
             tree.DoubleClicked += OnAddButtonClicked;
             filterEdit.Changed += OnFilterChanged;
+            filterEdit.MainWidget.GrabFocus();
         }
 
         /// <summary>Populate the tree control.</summary>
@@ -72,8 +73,21 @@
                 AddTreeNodeIfDoesntExist(modelThatCanBeAdded, rootNode);
 
             tree.Populate(rootNode);
-            if (models.Count() < 10)
+
+            //count how many non-function results are returned
+            int count = 0;
+            foreach (Apsim.ModelDescription description in models)
+            {
+                if (!description.ModelType.AssemblyQualifiedName.Contains("Models.Functions"))
+                    count += 1;
+            }
+
+            if (count < 10)
+            {
                 tree.ExpandChildren(".Models");
+                tree.CollapseChildren(".Models.Functions");
+            }
+                
         }
 
         private static void AddTreeNodeIfDoesntExist(Apsim.ModelDescription modelThatCanBeAdded, TreeViewNode parent)
@@ -160,23 +174,30 @@
                 {
                     this.explorerPresenter.MainPresenter.ShowWaitCursor(true);
 
-                    IModel child;
-                    if (!(selectedModelType.ModelType == typeof(ModelCollectionFromResource)) && 
-                        selectedModelType.ResourceString != null &&
-                        selectedModelType.ResourceString.Contains('.'))
+                    IModel child = null;
+                    if (!string.IsNullOrEmpty(selectedModelType.ResourceString))
                     {
-                        var contents = ReflectionUtilities.GetResourceAsString(explorerPresenter.ApsimXFile.GetType().Assembly,
-                                                                               selectedModelType.ResourceString);
-                        child = FileFormat.ReadFromString<Model>(contents, e => throw e, false);
-                        if (child.Children.Count == 1)
-                            child = child.Children[0];
-                    }
-                    else
-                    { 
-                        child = (IModel)Activator.CreateInstance(selectedModelType.ModelType, true);
-                        child.Name = selectedModelType.ModelName;
-                        if (child is ModelCollectionFromResource resource)
-                            resource.ResourceName = selectedModelType.ResourceString;
+                        child = Resource.Instance.GetModel(selectedModelType.ResourceString);
+                        if (child == null)
+                        {
+                            child = (IModel)Activator.CreateInstance(selectedModelType.ModelType, true);
+                            child.Name = selectedModelType.ModelName;
+                        }
+                        else
+                        {
+                            child.ResourceName = selectedModelType.ResourceString;
+                            bool isUnderReplacements = false;
+                            if (Folder.IsModelReplacementsFolder(model))
+                                isUnderReplacements = true;
+
+                            // Make all children that area about to be added from resource hidden and readonly.
+                            bool isHidden = !isUnderReplacements;
+                            foreach (Model descendant in child.FindAllDescendants())
+                            {
+                                descendant.IsHidden = isHidden;
+                                descendant.ReadOnly = isHidden;
+                            }
+                        }
                     }
 
                     var command = new AddModelCommand(this.model, child, explorerPresenter.GetNodeDescription);

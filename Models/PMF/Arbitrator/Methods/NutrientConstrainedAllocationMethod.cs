@@ -1,8 +1,9 @@
-﻿using APSIM.Shared.Utilities;
+﻿using System;
+using System.Linq;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
 using Models.Core;
 using Models.PMF.Interfaces;
-using System;
-using System.Linq;
 
 namespace Models.PMF.Arbitrator
 {
@@ -32,12 +33,12 @@ namespace Models.PMF.Arbitrator
             {
                 double TotalNDemand = N.StructuralDemand[i] + N.MetabolicDemand[i] + N.StorageDemand[i];
                 if (N.TotalAllocation[i] > TotalNDemand || MathUtilities.FloatsAreEqual(N.TotalAllocation[i], TotalNDemand))
-                    N.ConstrainedGrowth[i] = 100000000; //given high value so where there is no N deficit in organ and N limitation to growth  
+                    N.ConstrainedGrowth[i] = 100000000; //given high value so where there is no N deficit in organ and N limitation to growth
                 else
-                    if (N.TotalAllocation[i] == 0 | Organs[i].MinNconc == 0)
+                    if (N.TotalAllocation[i] == 0 | Organs[i].MinNConc == 0)
                     N.ConstrainedGrowth[i] = 0;
                 else
-                    N.ConstrainedGrowth[i] = N.TotalAllocation[i] / Organs[i].MinNconc;
+                    N.ConstrainedGrowth[i] = N.TotalAllocation[i] / Organs[i].MinNConc;
             }
 
             // Reduce DM allocation below potential if insufficient N to reach Min n Conc or if DM was allocated to fixation

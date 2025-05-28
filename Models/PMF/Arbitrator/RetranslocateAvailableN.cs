@@ -1,16 +1,17 @@
-﻿using APSIM.Shared.Utilities;
+﻿using System;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
 using Models.Core;
 using Models.Functions;
 using Models.PMF.Interfaces;
 using Models.PMF.Organs;
-using System;
 
 namespace Models.PMF
 {
 
     /// <summary>
     /// Process Retranslocation of BiomassType using Storage First and then Metabolic.
-    /// 
+    ///
     /// Arbitration is performed in two passes for each of the supply sources. On the
     /// first pass, biomass or nutrient supply is allocated to structural and metabolic
     /// pools of each organ based on their demand relative to the demand from all organs.
@@ -86,7 +87,7 @@ namespace Models.PMF
             var genOrgan = organ as GenericOrgan;
 
             // Retranslocation
-            if (MathUtilities.IsGreaterThan(nitrogen.Retranslocation, genOrgan.Live.StructuralN + genOrgan.Live.StorageN + genOrgan.Live.MetabolicN - genOrgan.NSupply.Retranslocation))
+            if (MathUtilities.IsGreaterThan(nitrogen.Retranslocation, genOrgan.Live.StructuralN + genOrgan.Live.StorageN + genOrgan.Live.MetabolicN - genOrgan.NSupply.ReTranslocation))
                 throw new Exception("N retranslocation exceeds storage + metabolic nitrogen in organ: " + Name);
 
             var remainingN = nitrogen.Retranslocation;

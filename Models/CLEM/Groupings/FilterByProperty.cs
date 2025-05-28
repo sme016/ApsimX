@@ -1,5 +1,4 @@
 ﻿using Models.CLEM.Interfaces;
-using Models.CLEM.Resources;
 using Models.Core;
 using Models.Core.Attributes;
 using Newtonsoft.Json;
@@ -23,12 +22,15 @@ namespace Models.CLEM.Groupings
     [Description("Defines a filter rule using properties and methods of the individual")]
     [ValidParent(ParentType = typeof(IFilterGroup))]
     [Version(1, 0, 0, "")]
+    [HelpUri(@"Content/Features/Filters/FilterByProperty.htm")]
+
     public class FilterByProperty : Filter, IValidatableObject
     {
         [NonSerialized]
         private PropertyInfo propertyInfo;
         private bool validOperator = true;
-        private IEnumerable<string> GetParameters() => Parent?.Parameters.OrderBy(k => k);
+        
+        private IEnumerable<string> GetParameters() => Parent?.GetParameterNames().OrderBy(k => k);
 
         /// <summary>
         /// The property or method to filter by
@@ -37,7 +39,24 @@ namespace Models.CLEM.Groupings
         [Required(AllowEmptyStrings = false, ErrorMessage = "Property or method to filter by required")]
         [Display(Type = DisplayType.DropDown, Values = nameof(GetParameters), Order = 1)]
         public string PropertyOfIndividual { get; set; }
-        
+
+        /// <inheritdoc/>
+        public override object ModifiedValueToUse
+        {
+            get 
+            {
+                switch (PropertyOfIndividual)
+                {
+                    // allow full path names for location by ignoring the GrazeFoodStore component.
+                    case "Location":
+                        if(Value is not null &&  Value.ToString().Contains("."))
+                            return Value.ToString().Split('.')[1];
+                        break;
+                }
+                return Value;
+            }
+        }
+
         /// <summary>
         /// Constructor
         /// </summary>
@@ -55,13 +74,12 @@ namespace Models.CLEM.Groupings
             if (Validator.TryValidateObject(this, context, results, true))
             {
                 Initialise();
-                Rule = Compile<IFilterable>();
+                // rules can only be built on commence not during use in UI (Descriptive summaries)
+                BuildRule();
             }
         }
 
-        /// <summary>
-        /// Initialise this filter by property 
-        /// </summary>
+        /// <inheritdoc/>
         public override void Initialise()
         {
             if (PropertyOfIndividual != null && PropertyOfIndividual != "")
@@ -72,9 +90,16 @@ namespace Models.CLEM.Groupings
         }
 
         /// <inheritdoc/>
+        public override void BuildRule()
+        {
+            if (Rule is null)
+                Rule = Compile<IFilterable>();
+        }
+
+        /// <inheritdoc/>
         public override Func<T, bool> Compile<T>()
         {
-            if (!validOperator) return f => false;
+            if (!validOperator || propertyInfo is null) return f => false;
             return CompileComplex<T>();
         }
 
@@ -93,7 +118,24 @@ namespace Models.CLEM.Groupings
             var key = Expression.Property(filterInherit, propertyInfo.Name);
 
             // Try convert the Value into the same data type as the property
-            var ce = propertyInfo.PropertyType.IsEnum ? Enum.Parse(propertyInfo.PropertyType, Value.ToString(), true) : Convert.ChangeType(Value ?? 0, propertyInfo.PropertyType);
+
+            string propError = "";
+            switch (propertyInfo.PropertyType.Name)
+            {
+                case "Boolean":
+                    if(Value != null && !bool.TryParse(Value.ToString(), out _))
+                        propError = $"The value to compare [{Value}] provided for [f={Name}] in [f={(Parent as CLEMModel).NameWithParent}] is not valid for the property type [Boolean]{System.Environment.NewLine}Valid entries are [True, true, False, false, 1, 0]";
+                    break;
+                default:
+                    break;
+            }
+            if(propError != "")
+            {
+                Warnings.CheckAndWrite(propError, Summary, this, MessageType.Error);
+                throw new ApsimXException(this, propError);
+            }
+
+            var ce = propertyInfo.PropertyType.IsEnum ? Enum.Parse(propertyInfo.PropertyType, ModifiedValueToUse.ToString(), true) : Convert.ChangeType(ModifiedValueToUse ?? 0, propertyInfo.PropertyType);
             var value = Expression.Constant(ce);
 
             // Create a lambda that compares the filter value to the property on T
@@ -234,7 +276,7 @@ namespace Models.CLEM.Groupings
                 bool truefalse = IsOperatorTrueFalseTest();
                 if (truefalse | (propertyInfo != null && propertyInfo.PropertyType.IsEnum))
                 {
-                    if(propertyInfo.PropertyType == typeof(bool))
+                    if (propertyInfo.PropertyType == typeof(bool))
                     {
                         if (Operator == ExpressionType.IsFalse || Value?.ToString().ToLower() == "false")
                             filterWriter.Write(" not");
@@ -270,9 +312,9 @@ namespace Models.CLEM.Groupings
                         }
                     }
                     else
-                        filterWriter.Write($" {CLEMModel.DisplaySummaryValueSnippet(OperatorToSymbol(), "Unknown operator", HTMLSummaryStyle.Filter, htmlTags: htmltags)}");
+                        filterWriter.Write($" {DisplaySummaryValueSnippet(OperatorToSymbol(), "Unknown operator", HTMLSummaryStyle.Filter, htmlTags: htmltags)}");
 
-                    filterWriter.Write($" {CLEMModel.DisplaySummaryValueSnippet(Value?.ToString(), "No value", HTMLSummaryStyle.Filter, htmlTags: htmltags)}");
+                    filterWriter.Write($" {DisplaySummaryValueSnippet(Value?.ToString(), "No value", HTMLSummaryStyle.Filter, htmlTags: htmltags)}");
                 }
                 return filterWriter.ToString();
             }

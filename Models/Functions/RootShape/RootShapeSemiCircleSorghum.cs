@@ -1,10 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
+using APSIM.Numerics;
+using APSIM.Shared.Utilities;
 using Models.Core;
 using Models.Interfaces;
-using APSIM.Shared.Utilities;
 using Models.PMF.Organs;
-using APSIM.Shared.Documentation;
 
 namespace Models.Functions.RootShape
 {
@@ -17,7 +16,7 @@ namespace Models.Functions.RootShape
     public class RootShapeSemiCircleSorghum : Model, IRootShape
     {
         /// <summary>Calculates the root area for a layer of soil</summary>
-        public void CalcRootProportionInLayers(ZoneState zone)
+        public void CalcRootProportionInLayers(IRootGeometryData zone)
         {
             var physical = zone.Soil.FindChild<Soils.IPhysical>();
             zone.RootArea = 0;
@@ -31,7 +30,7 @@ namespace Models.Functions.RootShape
                 if (zone.Depth < top)
                 {
                     prop = 0;
-                } 
+                }
                 else
                 {
                     rootArea = CalcRootAreaSemiCircleSorghum(zone, top, bottom, zone.RightDist);    // Right side
@@ -45,15 +44,13 @@ namespace Models.Functions.RootShape
             }
         }
 
-        /// <summary>Document the model.</summary>
-        public override IEnumerable<ITag> Document()
+        /// <summary>
+        /// Calculate proportion of soil volume occupied by root in each layer.
+        /// </summary>
+        /// <param name="zone">What is a ZoneState?</param>
+        public void CalcRootVolumeProportionInLayers(ZoneState zone)
         {
-            // Write description of this class from summary and remarks XML documentation.
-            foreach (var tag in GetModelDescription())
-                yield return tag;
-
-            foreach (var tag in DocumentChildren<IModel>())
-                yield return tag;
+            zone.RootProportionVolume = zone.RootProportions;
         }
 
         private double DegToRad(double degs)
@@ -61,7 +58,7 @@ namespace Models.Functions.RootShape
             return degs * Math.PI / 180.0;
         }
 
-        private double CalcRootAreaSemiCircleSorghum(ZoneState zone, double top, double bottom, double hDist)
+        private double CalcRootAreaSemiCircleSorghum(IRootGeometryData zone, double top, double bottom, double hDist)
         {
             if (zone.RootFront == 0.0)
             {

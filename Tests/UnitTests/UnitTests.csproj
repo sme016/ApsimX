@@ -1,14 +1,19 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <TargetFrameworks>net8.0</TargetFrameworks>
     <BaseOutputPath>../../bin</BaseOutputPath>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <RunSettingsFilePath>$(MSBuildProjectDirectory)\.runsettings</RunSettingsFilePath>
     <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
-    <NoWarn>CS1591,CS1572,CS1573,CS0067</NoWarn>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>CS1591,CS1572,CS1573,CS0067</NoWarn>
     <IsPublishable>false</IsPublishable>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <PropertyGroup>
+   <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,7 +22,14 @@
     <EmbeddedResource Include="**\*.apsim" />
     <EmbeddedResource Include="**\*.apsimx" />
     <EmbeddedResource Include="Weather\WeatherTestsExcelFile.xlsx" />
+    <EmbeddedResource Include="**\*.met" />
     <EmbeddedResource Include="**\*.Expected.txt" />
+    <EmbeddedResource Include="APSIMShared/Resources/*.csv" />
+    <EmbeddedResource Include="**\*.soil" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Resources\totalc.apsimx" />
   </ItemGroup>
 
   <ItemGroup>
@@ -25,15 +37,17 @@
     <ProjectReference Include="..\..\APSIM.Shared\APSIM.Shared.csproj" />
     <ProjectReference Include="..\..\ApsimNG\ApsimNG.csproj" />
     <ProjectReference Include="..\..\Models\Models.csproj" />
-    <ProjectReference Include="..\..\APSIM.Server\APSIM.Server.csproj" />
+    <ProjectReference Include="..\..\APSIM.Server\V1\APSIM.Server.csproj" />
     <ProjectReference Include="..\..\APSIM.Interop\APSIM.Interop.csproj" />
+    <ProjectReference Include="..\..\Gtk.Sheet\Gtk.Sheet.csproj" />
+    <ProjectReference Include="..\..\APSIM.Documentation\APSIM.Documentation.csproj" />
+    <ProjectReference Include="..\..\APSIM.Workflow\APSIM.Workflow.csproj" />
 
     <!-- nuget -->
-    <PackageReference Include="NUnit" Version="3.12.0" />
-    <PackageReference Include="NUnit3TestAdapter" Version="3.16.1" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.2.0" />
-    <PackageReference Include="System.Resources.Extensions" Version="5.0.0-preview.1.20120.5" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.6.1" />
-    <PackageReference Include="Moq" Version="4.16.1" />
+    <PackageReference Include="NUnit" Version="4.1.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+    <PackageReference Include="System.Resources.Extensions" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
+    <PackageReference Include="Moq" Version="4.20.70" />
   </ItemGroup>
 </Project>

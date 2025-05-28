@@ -1,12 +1,7 @@
-﻿using Models.CLEM.Activities;
-using Models.Core;
+﻿using Models.Core;
 using Models.Core.Attributes;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
 
 namespace Models.CLEM
@@ -52,7 +47,7 @@ namespace Models.CLEM
             get 
             { 
                 if(generator is null)
-                    throw new ApsimXException(new RandomNumberGenerator(), "Missing random number generator!\r\nThis simulation uses stochastic processes requiring random numbers\r\nYou must add a [o=CLEM.RandomNumberGenerator] component below the [o=Simulation]");
+                    throw new Exception("Missing random number generator!\r\nThis simulation uses stochastic processes requiring random numbers\r\nYou must add a [o=CLEM.RandomNumberGenerator] component below the [o=Simulation]");
 
                 return generator; 
             } 

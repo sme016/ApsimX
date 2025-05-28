@@ -1,12 +1,8 @@
 using System;
 using Models.Core;
 using Models.PMF.Organs;
-using Newtonsoft.Json;
 using Models.PMF.Struct;
-using System.IO;
-using Models.Functions;
-using System.Collections.Generic;
-using APSIM.Shared.Documentation;
+using Newtonsoft.Json;
 
 namespace Models.PMF.Phen
 {
@@ -37,7 +33,7 @@ namespace Models.PMF.Phen
 
         //5. Public properties
         //-----------------------------------------------------------------------------------------------------------------
-  
+
         /// <summary>The start</summary>
         [Description("Start")]
         public string Start { get; set; }
@@ -45,6 +41,10 @@ namespace Models.PMF.Phen
         /// <summary>The end</summary>
         [Description("End")]
         public string End { get; set; }
+
+        /// <summary>Is the phase emerged from the ground?</summary>
+        [Description("Is the phase emerged?")]
+        public bool IsEmerged { get; set; } = true;
 
         /// <summary>Return a fraction of phase complete.</summary>
         [JsonIgnore]
@@ -87,7 +87,7 @@ namespace Models.PMF.Phen
             DeadNodeNoAtStart = 0;
             First = true;
         }
-          
+
         /// <summary>Called when [simulation commencing].</summary>
         [EventSubscribe("Commencing")]
         private void OnSimulationCommencing(object sender, EventArgs e)
@@ -95,12 +95,5 @@ namespace Models.PMF.Phen
             ResetPhase();
         }
 
-        /// <summary>
-        /// Document the model.
-        /// </summary>
-        public override IEnumerable<ITag> Document()
-        {
-            yield return new Paragraph($"The *{Name}* phase goes from the *{Start}* stage to the *{End}* stage, which occurs when all leaves have fully senesced.");
-        }
     }
 }
